@@ -1359,8 +1359,25 @@ kbd {
   .side.shifted {
     transform: translateX(0);
   }
+  /* Bottom toolbar on narrow screens — left rail was display:none and hid world switch. */
   .rail {
-    display: none;
+    display: flex;
+    flex-direction: row;
+    left: 50%;
+    right: auto;
+    top: auto;
+    bottom: max(12px, env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    z-index: 15;
+  }
+  .rail .sep {
+    width: 1px;
+    height: 22px;
+    margin: 6px 4px;
+    align-self: center;
+  }
+  .side {
+    bottom: 72px;
   }
   .stats {
     gap: 5px;
