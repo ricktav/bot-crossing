@@ -174,7 +174,7 @@ export class Hud {
     body.appendChild(perf)
 
     // World.
-    const world = group('Planet')
+    const world = group('Host world')
     const planets = document.createElement('div')
     planets.className = 'planets'
     for (const id of PLANETS_ORDER) {
@@ -337,8 +337,10 @@ export class Hud {
     on('#btn-time', 'click', () => this.actions.cycleTime?.())
     on('#btn-open', 'click', () => {
       if (this.$('#btn-open').dataset.mode === 'copy-id') this.actions.copyThreadId?.()
+      else if (this.$('#btn-open').dataset.mode === 'web') this.actions.openWeb?.()
       else this.actions.openThread?.()
     })
+    on('#btn-web', 'click', () => this.actions.openWeb?.())
     on('#btn-archive', 'click', () => this.actions.archiveThread?.())
     on('#btn-deselect', 'click', () => this.actions.select?.(null))
     on('#btn-new-session', 'click', () => this.actions.newConversation?.())
@@ -433,8 +435,13 @@ export class Hud {
     swatch.style.color = hex(project.accent) // the halo is `currentColor`
     this.$('.side .name').textContent = project.name
     const path = this.$('.side .path')
-    path.textContent = project.path ? shortPath(project.path) : 'folder unknown'
-    path.title = project.path || ''
+    const pathLabel = project.path
+      ? shortPath(project.path)
+      : project.host
+        ? `on ${project.host}`
+        : 'folder unknown'
+    path.textContent = pathLabel
+    path.title = project.path || project.rawName || pathLabel
     // Nothing to open a new thread in, and nothing to reveal, without a folder on disk.
     this.$('#btn-new-session').disabled = !project.path
     this.$('#btn-reveal').disabled = !project.path
@@ -494,6 +501,11 @@ export class Hud {
     if (!agent || !thread) {
       card.classList.remove('on')
       this.selected = null
+      const webBtn = this.$('#btn-web')
+      if (webBtn) {
+        webBtn.hidden = true
+        webBtn.disabled = true
+      }
       return
     }
     this.selected = { agent, thread }
@@ -524,9 +536,17 @@ export class Hud {
     // often is how a HUD starts costing frames.
     this._cardSize = { w: card.offsetWidth, h: card.offsetHeight }
     const openBtn = this.$('#btn-open')
+    const webBtn = this.$('#btn-web')
     const canOpen = thread.canOpen !== false
+    const webUrl = thread.claudemuxUrl || thread.fleetReportUrl || ''
     // Grok Bot (and any harness without a deep link) gets Copy ID instead of a dead Open.
-    if (!canOpen && (thread.ref?.agentId || thread.openDisabledReason)) {
+    // Remotes with a claudemux page get Open → web instead.
+    if (!canOpen && webUrl && !thread.ref?.agentId) {
+      openBtn.disabled = false
+      openBtn.dataset.mode = 'web'
+      openBtn.innerHTML = `${ICON.open} Open`
+      openBtn.title = 'Open the claudemux page for this project (Enter)'
+    } else if (!canOpen && (thread.ref?.agentId || thread.openDisabledReason)) {
       openBtn.disabled = false
       openBtn.dataset.mode = 'copy-id'
       openBtn.innerHTML = `${ICON.copy} Copy ID`
@@ -538,6 +558,17 @@ export class Hud {
       openBtn.title = canOpen
         ? 'Open this thread in the harness it came from (Enter)'
         : 'This thread has no open link'
+    }
+    if (webBtn) {
+      const showWeb = Boolean(webUrl) && openBtn.dataset.mode !== 'web'
+      webBtn.hidden = !showWeb
+      webBtn.disabled = !showWeb
+      webBtn.title = thread.claudemuxUrl
+        ? 'Open claudemux project page in this browser'
+        : 'Open claudemux fleet report'
+      webBtn.innerHTML = thread.fleetReportUrl && !thread.claudemuxUrl
+        ? `${ICON.globe} Fleet report`
+        : `${ICON.globe} Web`
     }
   }
 
@@ -878,7 +909,7 @@ const TEMPLATE = `
   <button class="btn icon" id="btn-next" title="Next astronaut waiting on you (N)">${ICON.next}</button>
   <div class="sep"></div>
   <button class="btn icon" id="btn-orbit" title="Orbit mode — sweep around the colony (O)" aria-pressed="false">${ICON.orbit}</button>
-  <button class="btn icon" id="btn-planet" title="Change planet (Tab)">${ICON.globe}</button>
+  <button class="btn icon" id="btn-planet" title="Change host world (Tab)">${ICON.globe}</button>
   <button class="btn icon" id="btn-time" title="Change the time of day (L)">${ICON.sun}</button>
 </div>
 
@@ -901,6 +932,7 @@ const TEMPLATE = `
   <div class="progress"><i></i></div>
   <div class="pair">
     <button class="btn primary" id="btn-open" title="Open this thread in the harness it came from (Enter)">${ICON.open} Open</button>
+    <button class="btn" id="btn-web" hidden disabled title="Open claudemux page">${ICON.globe} Web</button>
     <button class="btn" id="btn-archive" title="Archive — this astronaut walks back to the ship (A)">${ICON.archive} Archive</button>
   </div>
 </div>
@@ -912,7 +944,7 @@ const TEMPLATE = `
 <div class="help">
   <div class="sheet panel">
     <h2>Bot Crossing</h2>
-    <p class="sub">Every coding-agent thread on this Mac is an astronaut. They walk out of the ship, claim a plot for their repo, and build. Click one to open its thread; click a zone — its deck or its name — for the repo itself, and start a new conversation there. Navigation works like Google Earth — drag the ground itself, right-drag to tilt, scroll to zoom in on whatever is under the cursor.</p>
+    <p class="sub">Every coding-agent thread is an astronaut. Tab switches host worlds (Mini, dm1, dm2, clawd, iMac) and Fleet. They walk out of the ship, claim a plot for their repo, and build. Click one to open its thread; click a zone — its deck or its name — for the repo itself, and start a new conversation there. Navigation works like Google Earth — drag the ground itself, right-drag to tilt, scroll to zoom in on whatever is under the cursor.</p>
     <div class="cols">
       <div>
         <div class="k"><span>Drag the ground</span><kbd>drag</kbd></div>
@@ -931,7 +963,7 @@ const TEMPLATE = `
         <div class="k"><span>Archive</span><kbd>A</kbd></div>
         <div class="k"><span>New conversation</span><kbd>C</kbd></div>
         <div class="k"><span>Orbit mode</span><kbd>O</kbd></div>
-        <div class="k"><span>Change planet</span><kbd>Tab</kbd></div>
+        <div class="k"><span>Next host world</span><kbd>Tab</kbd></div>
         <div class="k"><span>Time of day</span><kbd>L</kbd></div>
         <div class="k"><span>Deselect</span><kbd>Esc</kbd></div>
         <div class="k"><span>This sheet</span><kbd>?</kbd></div>

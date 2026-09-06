@@ -1,0 +1,16 @@
+{
+  "indexUrl": "http://claudemux.example.local/projects/",
+  "fleetReportUrl": "http://claudemux.example.local/claudemux-fleet.html",
+  "homeUrl": "http://claudemux.example.local/",
+  "pageBases": [
+    "http://claudemux.example.local/projects/projects/",
+    "http://claudemux.example.local/projects/"
+  ],
+  "hostKeys": {
+    "mini": "local-host",
+    "local": "local-host",
+    "alpha": "host-a",
+    "bravo": "host-b",
+    "studio": "host-c"
+  }
+}

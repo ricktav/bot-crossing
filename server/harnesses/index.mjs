@@ -7,7 +7,7 @@
  * `server/harnesses/README.md`.
  *
  * Exception: the Grok Bot fleet is a separate *world* in the UI (see `src/world/planet.js`
- * and the planet filter in `src/main.js`), so its agents do not mix into the coding colony.
+ * and the planet filter in `src/main.js`), so its agents do not mix into the host-world colonies (Mini/dm1/…).
  */
 import claudeCode from './claude-code.mjs'
 import grokBot from './grok-bot.mjs'

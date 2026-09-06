@@ -624,13 +624,18 @@ body {
 
 .thread-pop .pair {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
 .thread-pop .pair .btn {
-  flex: 1;
+  flex: 1 1 30%;
   min-width: 0;
   height: 34px;
+}
+
+.thread-pop .pair .btn[hidden] {
+  display: none !important;
 }
 
 .progress {

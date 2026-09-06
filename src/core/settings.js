@@ -8,6 +8,14 @@
 
 const STORE_KEY = 'botcrossing.settings.v1'
 
+/** Pre-host-world scenery ids still sitting in localStorage from older builds. */
+const LEGACY_PLANET_IDS = new Set(['moon', 'mars', 'terra'])
+function normalizePlanetId(id) {
+  if (!id || LEGACY_PLANET_IDS.has(id)) return 'mini'
+  return id
+}
+
+
 /**
  * What a fresh install opens on. Fixed rather than guessed from the device: `autoQuality`
  * scales the render buffer *under* whichever preset is chosen, so a slow machine is caught
@@ -120,7 +128,7 @@ const DEFAULTS = {
   ...PRESETS.balanced.values,
 
   // World
-  planet: 'moon',
+  planet: 'mini',
   timeOfDay: 0.32, // 0..1 — 0 is midnight, 0.5 is noon
   autoTime: false,
   dayLength: 240, // seconds for a full cycle when autoTime is on
@@ -159,6 +167,7 @@ const RENDER_KEYS = new Set([
 export class Settings {
   constructor() {
     this.values = { ...DEFAULTS, ...load() }
+    this.values.planet = normalizePlanetId(this.values.planet)
     this.listeners = new Set()
     this._saveTimer = 0
   }
@@ -253,7 +262,9 @@ export class Settings {
 function load() {
   try {
     const raw = JSON.parse(localStorage.getItem(STORE_KEY) || '{}')
-    return raw && typeof raw === 'object' ? raw : {}
+    if (!raw || typeof raw !== 'object') return {}
+    if ('planet' in raw) raw.planet = normalizePlanetId(raw.planet)
+    return raw
   } catch {
     return {}
   }

@@ -38,7 +38,27 @@ somebody writing that adapter.
 
 | Harness | Status |
 | --- | --- |
-| **[Claude Code](https://claude.com/claude-code)** (Anthropic) | ✅ **Supported** — desktop app and CLI, including worktrees, live-process detection and archiving |
+| **[Claude Code](https://claude.com/claude-code)** (Anthropic) | ✅ **Supported** — desktop app and CLI, including worktrees, live-process detection and archiving; optional **remote LAN mirrors** (`alpha/`…, `bravo/`…, `studio/`…) |
+
+### Remote Claude hosts (LAN)
+
+The mini already paints local Claude sessions. To also show sessions from other machines on
+the home LAN, Bot Crossing rsyncs each host's `~/.claude/projects` into
+`data/remotes/<id>/.claude/` (gitignored) and scans those mirrors as extra roots.
+
+| Label | SSH Host (example) | Notes |
+| --- | --- | --- |
+| `alpha` | `alpha` → `alice@192.0.2.10` | auto-rsync |
+| `bravo` | `bravo` → `alice@192.0.2.11` | auto-rsync |
+| `studio` | optional `studio` → `alice@192.0.2.12` | **rsync mirror, not tokens**; `enabled: false` until sshd is up — seed `data/remotes/studio/.claude` manually |
+
+- Config: copy [`server/remotes.config.sample.json`](server/remotes.config.sample.json) → `server/remotes.config.json` (gitignored) — set `enabled`, `ssh`, `label`.
+- One-shot: `scripts/sync-remote-claude.sh` (or let the server sync every `syncIntervalMs`).
+- Plot names are prefixed (`alpha/myapp`, `studio/firmware`) so they never collide with Mini projects of the same basename.
+- Thread ids for remotes are `host:sessionUuid`. Archive stays local-only. **Open** on a remote prefers a **claudemux web page** when your configured index lists one (see below); otherwise the button stays Copy ID / disabled with “Session lives on alpha…”.
+- To add another host: add an SSH `Host` with key auth, append a row in `remotes.config.json`, run the sync script once, reload the colony.
+
+
 | **Grok Bot** (fleet JSON) | ✅ **Supported** — separate **Fleet** world; one plot per agent from `data/fleet.json` or `GROK_BOT_FLEET_*` |
 | [Codex CLI](https://developers.openai.com/codex/cli) (OpenAI) | ⬜ Not yet — transcripts found at `~/.codex/sessions/`, [notes here](server/harnesses/README.md#starting-points) |
 | [OpenCode](https://opencode.ai) | ⬜ Not yet |
@@ -50,9 +70,10 @@ somebody writing that adapter.
 | [Qwen Code](https://github.com/QwenLM/qwen-code) (Alibaba) | ⬜ Not yet |
 | [Amazon Q Developer CLI](https://aws.amazon.com/q/developer/) | ⬜ Not yet |
 
-Coding harnesses that are installed show up together on Luna/Mars/Terra — the colony is the
-union of those — and an astronaut carries the name of the harness it belongs to. **Grok Bot**
-agents live on their own **Fleet** world instead, so they never mix into the coding colony.
+Each **host world** is its own colony view (Mini, alpha, bravo, studio, …), so a busy remote
+cannot swamp the mini. Visual skins still look like Luna/Mars/Terra; the switcher filters by
+host. **Grok Bot** agents live on their own **Fleet** world instead. Host ids come from your
+local `remotes.config.json` (see the sample).
 
 ### Adding one
 
@@ -267,7 +288,7 @@ under **View → Return to isometric**.
 | `Enter` / `A` | Open / archive the selected thread |
 | `C` | New conversation in the open zone's folder |
 | `O` | Orbit mode |
-| `Tab` | Next planet |
+| `Tab` | Next host world (Mini → alpha → bravo → studio → Fleet) |
 | `L` | Next time of day |
 | `P` | Screenshot |
 | `0` | Reset the view |
@@ -275,10 +296,41 @@ under **View → Return to isometric**.
 | `?` | Help |
 
 
+## Host worlds (planet picker)
+
+The globe button, Settings → **Host world**, and `Tab` cycle:
+
+| World | What you see |
+| --- | --- |
+| **Mini** | Local Claude on this machine (no `host/` project prefix) |
+| **alpha** | Mirrored sessions prefixed `alpha/` |
+| **bravo** | Mirrored sessions prefixed `bravo/` (own sticky layout — not mixed with Mini) |
+| **studio** | Mirrored sessions prefixed `studio/` (rsync mirror, not tokens; often `enabled: false` until sshd) |
+| **Fleet** | Grok Bot agents only |
+
+Sticky plot layouts are stored **per world** in `data/colony.json` (`plotsByWorld`), so switching
+hosts does not steal each other’s tiles.
+
+### Claudemux web Open
+
+Optional. Copy [`server/claudemux.config.sample.json`](server/claudemux.config.sample.json) →
+`server/claudemux.config.json` (gitignored), or set `CLAUDEMUX_INDEX` / `CLAUDEMUX_FLEET`.
+
+When a thread has a matching page in the configured index, Bot Crossing attaches `claudemuxUrl`
+(resolved from the index — no invented 404s). Pattern: `{project}__{hostKey}.html` with host
+keys from your config (sample: `local-host` for Mini, `host-a` / `host-b` for remotes). Host
+prefixes are stripped (`bravo/myapp` → `myapp`).
+
+- **Open** on a remote with a page navigates that http(s) URL in *this* browser (same LAN/iPad
+  behaviour as other Open links).
+- A secondary **Web** button appears when a harness deep link is also available (local Claude),
+  or **Fleet report** for Grok Bot when `fleetReportUrl` is set.
+- If the index is unreachable or unset, Open/Copy ID behaviour is unchanged.
+
 ## Fleet (Grok Bot)
 
-A separate planet for **Grok Bot** agents — one plot and one astronaut per agent, not per chat.
-Switch to it from the Planet picker in Settings, or cycle with `Tab` until **Fleet** lands.
+A separate world for **Grok Bot** agents — one plot and one astronaut per agent, not per chat.
+Switch to it from the Host world picker in Settings, or cycle with `Tab` until **Fleet** lands.
 
 Active agents (recent, waiting, running, error) stay bright and named, with the usual badges
 (`?` waiting, hammer working, `!` error). Agents quiet for about three days sleep and dim,
@@ -323,10 +375,11 @@ not per-browser.
 
 ## Planets and light
 
-Four worlds — **Luna**, **Mars**, **Terra**, and **Fleet** — and a full day/night cycle you can
-scrub or let run. A planet is a bag of colours and two switches; terrain, scatter, sky and
-lighting all read from the same preset, so another world is a data change rather than a code
-change. Fleet is special: it only shows Grok Bot agents (see below).
+Host worlds — **Mini**, remotes from your config (sample: **alpha** / **bravo** / **studio**), and **Fleet** — reuse Luna /
+Mars / Terra / Fleet visual skins, plus a full day/night cycle you can scrub or let run. A
+planet entry is a bag of colours and two switches; terrain, scatter, sky and lighting all read
+from the same preset. The important part is the **host filter**: each world shows only that
+machine’s threads (Fleet = Grok Bot only).
 
 ### The sky is the HDRI
 

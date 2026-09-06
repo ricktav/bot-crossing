@@ -19,3 +19,13 @@ assets-src
 
 # Local capture output — not part of the project.
 recordings
+
+# Mirrored Claude Code trees from other LAN hosts (see remotes.config.sample.json).
+data/remotes/
+
+# Per-LAN remote Claude + claudemux wiring (copy from the *.sample.json files).
+server/remotes.config.json
+server/claudemux.config.json
+
+# Local backups of LAN inventory — never commit.
+*.localbak

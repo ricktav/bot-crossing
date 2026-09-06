@@ -12,7 +12,10 @@ const post = (url, payload) =>
     body: JSON.stringify(payload),
   })
 
-export const fetchThreads = () => req('/api/threads')
+export const fetchThreads = (world) => {
+  const q = world && world !== 'all' ? `?world=${encodeURIComponent(world)}` : ''
+  return req(`/api/threads${q}`)
+}
 export const fetchState = () => req('/api/state')
 
 export const saveState = (state) =>
@@ -29,7 +32,13 @@ export const saveState = (state) =>
  * thread again, and the browser only ever passes it straight back. Nothing in the UI knows
  * what a Claude Code session id, or a Codex rollout id, actually looks like.
  */
-export const openThread = (thread) => post('/api/open', { harness: thread.harness, ref: thread.ref })
+export const openThread = (thread, { preferWeb = false } = {}) =>
+  post('/api/open', {
+    harness: thread.harness,
+    ref: thread.ref,
+    project: thread.project,
+    preferWeb: Boolean(preferWeb),
+  })
 
 export const archiveThread = (thread, archived) =>
   post('/api/archive', { id: thread.id, harness: thread.harness, ref: thread.ref, archived })

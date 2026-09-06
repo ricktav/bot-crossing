@@ -180,3 +180,11 @@ a new one should clear too:
 4. `npm run dev`, then confirm the astronauts appear on the right plots, the thread card fills
    in, and Open does what you expect.
 5. Archive one thread and check it shows as archived **in the harness's own UI**, not just here.
+
+## Remote Claude mirrors
+
+Claude Code on this fork can also scan rsync mirrors under `data/remotes/<host>/.claude/projects`
+(see `server/remotes.config.json` and `server/lib/remote-claude.mjs`). Those threads keep
+`harness: claude-code` but carry `remote: true`, host-prefixed `project` names, and
+`canOpen: false` so a deep link never resumes the wrong machine's session.
+

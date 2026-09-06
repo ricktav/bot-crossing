@@ -110,7 +110,7 @@ export class Colony {
     this.camera = camera
     this.renderer = renderer
 
-    this.planet = PLANETS[settings.get('planet')] || PLANETS.moon
+    this.planet = PLANETS[settings.get('planet')] || PLANETS.mini
     this.sky = new Sky(scene, settings, renderer)
     this.sky.setPlanet(this.planet)
     // Push the stored time in explicitly. `settings.set` is a no-op when the value has not
@@ -232,7 +232,7 @@ export class Colony {
   }
 
   setPlanet(id) {
-    const planet = PLANETS[id]
+    const planet = PLANETS[id] || PLANETS.mini
     if (!planet || planet === this.planet) return
     this.planet = planet
     this.sky.setPlanet(planet)

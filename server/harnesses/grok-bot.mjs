@@ -97,6 +97,12 @@ function toThread(agent) {
 
   const name = String(agent.name || id).trim() || id
   const description = String(agent.description || agent.summary || '').trim()
+  const TITLE_MAX = 120
+  const PREVIEW_MAX = 160
+  const clip = (v, max) => {
+    const s = String(v || '').replace(/\s+/g, ' ').trim()
+    return s.length <= max ? s : s.slice(0, max - 1).trimEnd() + '…'
+  }
   const summary = String(agent.summary || agent.description || '').trim()
   const openUrl = resolveOpenUrl(agent, id)
   const lastActivityAt = num(agent.lastActivityAt)
@@ -107,8 +113,8 @@ function toThread(agent) {
 
   return {
     id: threadId,
-    title: name,
-    preview: description || summary,
+    title: clip(name, TITLE_MAX),
+    preview: clip(description || summary, PREVIEW_MAX),
     project: name,
     projectPath: '',
     worktree: '',

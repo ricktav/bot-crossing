@@ -6,14 +6,16 @@ import { atlasTexture, hasPart, part } from './kit.js'
  *
  * A planet is nothing but a bag of colours and a couple of switches — terrain, scatter, sky
  * and lighting all read from the same preset, so adding another world is a data change
- * rather than a code change. Fleet is the Grok Bot world — see main.js for the harness filter.
+ * rather than a code change. Selectable entries are host worlds (Mini/dm1/…) plus Fleet —
+ * see main.js for the host filter; skins still read like Luna/Mars/Terra.
  */
 
-export const PLANETS = {
+/**
+ * Visual skins (Luna / Mars / Terra / Fleet look). Host worlds below reuse these so each
+ * machine gets its own colony filter without inventing six unique biomes.
+ */
+const SKINS = {
   moon: {
-    id: 'moon',
-    name: 'Luna',
-    blurb: 'Airless, high contrast, very long shadows.',
     ground: { low: 0x4a4a52, high: 0x8f8d90, tint: 0xb9b4ae },
     rock: 0x6d6a70,
     horizon: 0x14141c,
@@ -30,9 +32,6 @@ export const PLANETS = {
     dust: 0,
   },
   mars: {
-    id: 'mars',
-    name: 'Mars',
-    blurb: 'Rust, dust, and a pink sky at noon.',
     ground: { low: 0x6b3320, high: 0xb56b40, tint: 0xd89464 },
     rock: 0x8a4a2c,
     horizon: 0x3a2118,
@@ -48,9 +47,6 @@ export const PLANETS = {
     dust: 1,
   },
   terra: {
-    id: 'terra',
-    name: 'Terra',
-    blurb: 'An earthlike one. Grass, blue hour, fireflies.',
     ground: { low: 0x2f5a34, high: 0x6d9a4a, tint: 0x86ae5c },
     rock: 0x6b6f63,
     horizon: 0x6fa8d8,
@@ -65,11 +61,7 @@ export const PLANETS = {
     companion: { name: 'Moon', color: 0xdcd8cc, size: 3.2, glow: 0xfff6e0 },
     dust: 0.25,
   },
-  // Grok Bot agents only — coding threads stay on Luna/Mars/Terra. Filtered in main.js.
   fleet: {
-    id: 'fleet',
-    name: 'Fleet',
-    blurb: 'Grok Bot dockyard — cold hulls, long shadows, cyan trim.',
     ground: { low: 0x1a2438, high: 0x3a4e6e, tint: 0x5a7a9a },
     rock: 0x4a5568,
     horizon: 0x0c1424,
@@ -84,6 +76,46 @@ export const PLANETS = {
     companion: { name: 'Station', color: 0x88aacc, size: 2.4, glow: 0x66ccff },
     dust: 0.15,
   },
+}
+
+const withSkin = (skin, meta) => ({ ...SKINS[skin], ...meta, skin })
+
+/**
+ * Host worlds + Fleet. Filtered in main.js by host label / harness so each machine is its
+ * own colony. Skins reuse Luna/Mars/Terra/Fleet looks.
+ */
+export const PLANETS = {
+  mini: withSkin('moon', {
+    id: 'mini',
+    name: 'Mini',
+    blurb: 'Local Claude on this machine — no host prefix.',
+  }),
+  dm1: withSkin('mars', {
+    id: 'dm1',
+    name: 'dm1',
+    blurb: 'Remote Claude mirror — plots prefixed dm1/.',
+  }),
+  dm2: withSkin('terra', {
+    id: 'dm2',
+    name: 'dm2',
+    blurb: 'Second remote mirror — its own colony, not mixed with Mini.',
+  }),
+  clawd: withSkin('moon', {
+    id: 'clawd',
+    name: 'clawd',
+    blurb: 'Optional remote mirror — plots prefixed clawd/.',
+  }),
+  imac: withSkin('mars', {
+    id: 'imac',
+    name: 'iMac',
+    blurb: 'Optional rsync mirror (not tokens); leave disabled until sshd.',
+  }),
+  // Grok Bot agents only — coding threads stay on host worlds. Filtered in main.js.
+  fleet: withSkin('fleet', {
+    id: 'fleet',
+    name: 'Fleet',
+    blurb: 'Grok Bot dockyard — cold hulls, long shadows, cyan trim.',
+  }),
 }
 
 const GROUND_SIZE = 340
