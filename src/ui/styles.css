@@ -565,6 +565,21 @@ body {
   -webkit-box-orient: vertical;
 }
 
+.thread-pop .preview {
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.thread-pop .preview[hidden] {
+  display: none;
+}
+
 .thread-pop .meta {
   display: flex;
   align-items: center;

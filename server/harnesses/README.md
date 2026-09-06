@@ -5,9 +5,11 @@ Codex CLI, OpenCode, and so on. Bot Crossing does not care which one you use: it
 harness present on the machine for its threads and draws whatever comes back.
 
 Adding one is meant to be **one new file in this directory**, plus one line in `index.mjs`.
-Nothing in `server/scan.mjs`, `server/api.mjs`, or anywhere under `src/` should need to change.
-If you find yourself editing those to land a harness, that is a bug in this seam — please say so
-in the PR, because the next person will hit it too.
+Nothing in `server/scan.mjs`, `server/api.mjs`, or anywhere under `src/` should need to change
+for a coding harness that joins the existing colony. If you find yourself editing those to land
+a harness, that is a bug in this seam — please say so in the PR, because the next person will
+hit it too. (Grok Bot is the deliberate exception: it adds a **Fleet** planet and a harness
+filter so those agents stay off Luna/Mars/Terra.)
 
 ## The shape of it
 
@@ -137,6 +139,9 @@ Verified on a real machine:
   (`%APPDATA%\Claude\claude-code-sessions\…` on Windows); CLI transcripts in
   `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`; live processes in
   `~/.claude/sessions/*.json`. Implemented in `claude-code.mjs`.
+- **Grok Bot** — JSON feed of agents (`data/fleet.json`, or `GROK_BOT_FLEET_JSON` /
+  `GROK_BOT_FLEET_URL`). Implemented in `grok-bot.mjs`. Agents appear on the **Fleet**
+  world only (filtered in `src/main.js`), one plot per agent.
 - **Codex CLI** — transcripts in `~/.codex/sessions/YYYY/MM/DD/rollout-<iso>-<uuid>.jsonl`,
   with records shaped `{ timestamp, type, payload }`, and what looks like an index at
   `~/.codex/session_index.jsonl`. Not implemented yet.

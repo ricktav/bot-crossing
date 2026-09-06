@@ -6,6 +6,7 @@ import { CameraRig } from './core/camera.js'
 import { Colony, STATUS_LABEL, STATUS_ORDER, statusFor, transcriptProgress } from './game/colony.js'
 import { Hud } from './ui/hud.js'
 import { PLANETS } from './world/planet.js'
+import { FLEET_PLANET } from './ui/hud-data.js'
 import { loadKit } from './world/kit.js'
 import { crewRig, loadCrew } from './agents/crew.js'
 import { TIMES } from './world/sky.js'
@@ -538,17 +539,24 @@ window.addEventListener('keydown', (e) => {
 
 // ── data ──────────────────────────────────────────────────────────────────────────────
 
+/** Coding worlds hide Grok Bot; Fleet hides everyone else. */
+function threadsForPlanet(list, planetId = settings.get('planet')) {
+  const onFleet = planetId === FLEET_PLANET
+  return list.filter((t) => (t.harness === 'grok-bot') === onFleet)
+}
+
 function applyThreads(list) {
   threads = list
+  const visible = threadsForPlanet(list)
   const archivedSet = new Set(state.archived)
-  const stats = colony.setThreads(list, archivedSet)
+  const stats = colony.setThreads(visible, archivedSet)
   hud.setStats(stats)
 
   legendProjects = colony.plotOrder
     .map((plot) => ({
       name: plot.name,
       accent: plot.accent,
-      count: list.filter((t) => !t.archived && !archivedSet.has(t.id) && t.project === plot.name).length,
+      count: visible.filter((t) => !t.archived && !archivedSet.has(t.id) && t.project === plot.name).length,
       urgent: colony.urgentPlots?.has(plot.id) ?? false,
     }))
     .sort((a, b) => b.count - a.count)
@@ -656,7 +664,7 @@ settings.onChange((changed, scope) => {
   if (scope.render || changed.has('fov')) engine.applySettings()
   colony.onSettingsChanged(changed, scope)
   if (changed.has('showFps')) hud.syncSettings()
-  if (changed.has('maxAgents')) applyThreads(threads)
+  if (changed.has('maxAgents') || changed.has('planet')) applyThreads(threads)
 })
 
 // ── frame ─────────────────────────────────────────────────────────────────────────────

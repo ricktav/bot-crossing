@@ -1,0 +1,73 @@
+{
+  "scannedAt": 1788694633033,
+  "agents": [
+    {
+      "id": "a1111111-1111-4111-8111-111111111111",
+      "name": "Maestro",
+      "description": "Orchestrates the fleet — assigns work and watches the board.",
+      "state": "running",
+      "lastActivityAt": 1788694513033,
+      "summary": "Spinning up three follow-ups from the morning standup.",
+      "openUrl": "https://example.com/agents/maestro"
+    },
+    {
+      "id": "a2222222-2222-4222-8222-222222222222",
+      "name": "Cartographer",
+      "description": "Maps LAN hosts and keeps the inventory honest.",
+      "state": "waiting",
+      "lastActivityAt": 1788693433033,
+      "summary": "Needs a call on whether to include guest Wi-Fi.",
+      "openUrl": "https://example.com/agents/cartographer"
+    },
+    {
+      "id": "a3333333-3333-4333-8333-333333333333",
+      "name": "Scribe",
+      "description": "Turns chat dumps into short notes worth keeping.",
+      "state": "idle",
+      "lastActivityAt": 1788673033033,
+      "summary": "Filed yesterday's design review."
+    },
+    {
+      "id": "a4444444-4444-4444-8444-444444444444",
+      "name": "Sentinel",
+      "description": "Watches build failures and pages when something sticks.",
+      "state": "error",
+      "lastActivityAt": 1788691033033,
+      "summary": "Webhook 502 from the status page — retrying.",
+      "openUrl": "https://example.com/agents/sentinel"
+    },
+    {
+      "id": "a5555555-5555-4555-8555-555555555555",
+      "name": "Gardener",
+      "description": "Prunes stale branches and closes quiet PRs.",
+      "state": "idle",
+      "lastActivityAt": 1788521833033,
+      "summary": "Last sweep cleared four abandoned branches."
+    },
+    {
+      "id": "a6666666-6666-4666-8666-666666666666",
+      "name": "Courier",
+      "description": "Shuttles files between the Mac mini and the NAS.",
+      "state": "idle",
+      "lastActivityAt": 1788349033033,
+      "summary": "Quiet for a few days — nothing queued."
+    },
+    {
+      "id": "a7777777-7777-4777-8777-777777777777",
+      "name": "Archivist",
+      "description": "Indexes screenshots and chat exports for later search.",
+      "state": "idle",
+      "lastActivityAt": 1788262633033,
+      "summary": "Sleeping until the next drop lands."
+    },
+    {
+      "id": "a8888888-8888-4888-8888-888888888888",
+      "name": "Quartermaster",
+      "description": "Tracks token spend and rate limits across the fleet.",
+      "state": "running",
+      "lastActivityAt": 1788694333033,
+      "summary": "Rolling a daily spend digest.",
+      "openUrl": "https://example.com/agents/quartermaster"
+    }
+  ]
+}

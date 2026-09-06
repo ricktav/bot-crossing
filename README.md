@@ -39,6 +39,7 @@ somebody writing that adapter.
 | Harness | Status |
 | --- | --- |
 | **[Claude Code](https://claude.com/claude-code)** (Anthropic) | ✅ **Supported** — desktop app and CLI, including worktrees, live-process detection and archiving |
+| **Grok Bot** (fleet JSON) | ✅ **Supported** — separate **Fleet** world; one plot per agent from `data/fleet.json` or `GROK_BOT_FLEET_*` |
 | [Codex CLI](https://developers.openai.com/codex/cli) (OpenAI) | ⬜ Not yet — transcripts found at `~/.codex/sessions/`, [notes here](server/harnesses/README.md#starting-points) |
 | [OpenCode](https://opencode.ai) | ⬜ Not yet |
 | [Antigravity CLI](https://antigravity.google) (Google) | ⬜ Not yet — the successor to Gemini CLI, which Google stopped serving individual accounts on 18 June 2026 |
@@ -49,8 +50,9 @@ somebody writing that adapter.
 | [Qwen Code](https://github.com/QwenLM/qwen-code) (Alibaba) | ⬜ Not yet |
 | [Amazon Q Developer CLI](https://aws.amazon.com/q/developer/) | ⬜ Not yet |
 
-Every harness that is installed shows up at once — the colony is the union of all of them, and
-an astronaut carries the name of the harness it belongs to.
+Coding harnesses that are installed show up together on Luna/Mars/Terra — the colony is the
+union of those — and an astronaut carries the name of the harness it belongs to. **Grok Bot**
+agents live on their own **Fleet** world instead, so they never mix into the coding colony.
 
 ### Adding one
 
@@ -270,11 +272,57 @@ under **View → Return to isometric**.
 | `Esc` | Deselect, and close the zone sidebar |
 | `?` | Help |
 
+
+## Fleet (Grok Bot)
+
+A separate planet for **Grok Bot** agents — one plot and one astronaut per agent, not per chat.
+Switch to it from the Planet picker in Settings, or cycle with `Tab` until **Fleet** lands.
+
+Active agents (recent, waiting, running, error) stay bright and named, with the usual badges
+(`?` waiting, hammer working, `!` error). Agents quiet for about three days sleep and dim,
+and their names only appear on hover so the map stays readable.
+
+### Pointing at a feed
+
+The `grok-bot` harness reads JSON shaped like:
+
+```json
+{
+  "agents": [{
+    "id": "uuid",
+    "name": "Maestro",
+    "description": "optional",
+    "state": "idle|running|waiting|error",
+    "lastActivityAt": 0,
+    "summary": "optional",
+    "openUrl": "optional"
+  }],
+  "scannedAt": 0
+}
+```
+
+Sources, first match wins for the URL, then file:
+
+| Source | How |
+| --- | --- |
+| `GROK_BOT_FLEET_URL` | HTTP(S) JSON endpoint |
+| `GROK_BOT_FLEET_JSON` | Absolute path to a JSON file |
+| `data/fleet.json` | Default next to `colony.json` |
+
+`data/fleet.sample.json` ships with a handful of fake agents. For a local demo, copy it to
+`data/fleet.json` (that file is gitignored, like the colony state). The harness is read-only
+in v1 — Open works only when an agent carries `openUrl`.
+
+On a LAN bind (`BOT_CROSSING_HOST=0.0.0.0` / `npx vite --host 0.0.0.0`), the same
+`data/fleet.json` on the machine running the server is what every client sees — the feed is
+not per-browser.
+
 ## Planets and light
 
-Three worlds — **Luna**, **Mars**, **Terra** — and a full day/night cycle you can scrub or
-let run. A planet is a bag of colours and two switches; terrain, scatter, sky and lighting all
-read from the same preset, so a fourth world is a data change rather than a code change.
+Four worlds — **Luna**, **Mars**, **Terra**, and **Fleet** — and a full day/night cycle you can
+scrub or let run. A planet is a bag of colours and two switches; terrain, scatter, sky and
+lighting all read from the same preset, so another world is a data change rather than a code
+change. Fleet is special: it only shows Grok Bot agents (see below).
 
 ### The sky is the HDRI
 

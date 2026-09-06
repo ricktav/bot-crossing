@@ -282,8 +282,9 @@ export class Colony {
     // Plots holding anything that wants your attention get a pulsing rim, so you can spot
     // the repo that needs you from right across the colony without reading a single label.
     const urgent = new Set()
-    // Plots with anyone working, waiting or stuck keep their name on screen; quiet ones
-    // only show it on hover.
+    // Plots with anyone still awake keep their name on screen; only sleeping (quiet ~3
+    // days) hides it until hover — so an active Fleet stays readable without drowning in
+    // dormant labels.
     const active = new Set()
 
     for (const [name, list] of projects) {
@@ -296,7 +297,7 @@ export class Colony {
         const status = statusFor(thread, now)
         if (stats[status] !== undefined) stats[status]++
         if (status === 'waiting' || status === 'blocked') urgent.add(plot.id)
-        if (status === 'waiting' || status === 'blocked' || status === 'working') active.add(plot.id)
+        if (status !== 'sleeping') active.add(plot.id)
         stats.agents++
 
         const building = this._syncBuilding(thread, plot, i)

@@ -497,6 +497,10 @@ export class Hud {
     card.classList.add('on')
 
     this.$('.thread-pop .title').textContent = thread.title || 'Untitled thread'
+    const preview = this.$('.thread-pop .preview')
+    const blurb = (thread.preview || '').trim()
+    preview.textContent = blurb
+    preview.hidden = !blurb
     const status = STATUS_LABEL[agent.status] || agent.status
     const meta = this.$('.thread-pop .meta')
     const bits = [
@@ -871,6 +875,7 @@ const TEMPLATE = `
     <div class="avatar"><canvas></canvas></div>
     <div class="info">
       <div class="title"></div>
+      <div class="preview"></div>
       <div class="meta"></div>
     </div>
     <button class="btn icon ghost" id="btn-deselect" title="Deselect (Esc)">${ICON.close}</button>

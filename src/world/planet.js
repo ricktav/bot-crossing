@@ -2,11 +2,11 @@ import * as THREE from 'three'
 import { atlasTexture, hasPart, part } from './kit.js'
 
 /**
- * The three worlds you can put the colony on, and the terrain generator that draws them.
+ * The worlds you can put the colony on, and the terrain generator that draws them.
  *
  * A planet is nothing but a bag of colours and a couple of switches — terrain, scatter, sky
- * and lighting all read from the same preset, so adding a fourth world is a data change
- * rather than a code change.
+ * and lighting all read from the same preset, so adding another world is a data change
+ * rather than a code change. Fleet is the Grok Bot world — see main.js for the harness filter.
  */
 
 export const PLANETS = {
@@ -64,6 +64,25 @@ export const PLANETS = {
     scatter: 'flora',
     companion: { name: 'Moon', color: 0xdcd8cc, size: 3.2, glow: 0xfff6e0 },
     dust: 0.25,
+  },
+  // Grok Bot agents only — coding threads stay on Luna/Mars/Terra. Filtered in main.js.
+  fleet: {
+    id: 'fleet',
+    name: 'Fleet',
+    blurb: 'Grok Bot dockyard — cold hulls, long shadows, cyan trim.',
+    ground: { low: 0x1a2438, high: 0x3a4e6e, tint: 0x5a7a9a },
+    rock: 0x4a5568,
+    horizon: 0x0c1424,
+    sky: { top: 0x050814, bottom: 0x1a2840 },
+    fog: { color: 0x0a1220, near: 95, far: 220 },
+    sun: { color: 0xc8e4ff, intensity: 2.35, night: 0.07 },
+    ambient: { sky: 0x3a5a88, ground: 0x1a2030, intensity: 0.78 },
+    atmosphere: 0.35,
+    craters: 8,
+    roughness: 0.85,
+    scatter: 'rocks',
+    companion: { name: 'Station', color: 0x88aacc, size: 2.4, glow: 0x66ccff },
+    dust: 0.15,
   },
 }
 

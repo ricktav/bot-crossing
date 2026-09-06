@@ -4,6 +4,7 @@ dist
 # Your colony: which repo sits on which plot, and what you archived. Holds the names and
 # paths of the repos you work in, so it stays out of the repository.
 data/*.json
+!data/*.sample.json
 data/*.tmp
 
 # Per-machine Claude Code permissions — personal paths live in here.
