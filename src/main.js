@@ -642,22 +642,14 @@ let activeWorld = normalizeWorld(settings.get('planet'))
 function migratePlotsByWorld(state) {
   if (!state.plotsByWorld || typeof state.plotsByWorld !== 'object') state.plotsByWorld = {}
   const by = state.plotsByWorld
+  for (const id of PLANETS_ORDER) by[id] = by[id] || {}
+  // Do NOT copy coordinates from the pre-split shared map: those tiles were laid among
+  // every host at once, so slicing them by prefix leaves disjoint hex islands. Empty
+  // worlds re-pack contiguous blobs via allocateCells on the next roster.
   const hasAny = PLANETS_ORDER.some((id) => by[id] && Object.keys(by[id]).length)
   if (hasAny) return
-  // First run after host-world split: bucket the flat sticky map by project prefix.
-  const flat = state.plots || {}
-  for (const id of PLANETS_ORDER) by[id] = by[id] || {}
-  for (const [name, cells] of Object.entries(flat)) {
-    let world = 'mini'
-    for (const prefix of HOST_PREFIXES) {
-      if (name === prefix || name.startsWith(`${prefix}/`)) {
-        world = prefix
-        break
-      }
-    }
-    // Unprefixed names stay on Mini; Fleet re-seeds from scratch (agent names mixed in).
-    by[world][name] = cells
-  }
+  // Drop the flat map so we never re-import scattered cells on a later boot.
+  state.plots = {}
 }
 
 function saveActiveWorldLayout() {
