@@ -335,7 +335,10 @@ export class Hud {
     on('#btn-orbit', 'click', () => this.setOrbit(this.actions.toggleOrbit?.()))
     on('#btn-planet', 'click', () => this.actions.cyclePlanet?.())
     on('#btn-time', 'click', () => this.actions.cycleTime?.())
-    on('#btn-open', 'click', () => this.actions.openThread?.())
+    on('#btn-open', 'click', () => {
+      if (this.$('#btn-open').dataset.mode === 'copy-id') this.actions.copyThreadId?.()
+      else this.actions.openThread?.()
+    })
     on('#btn-archive', 'click', () => this.actions.archiveThread?.())
     on('#btn-deselect', 'click', () => this.actions.select?.(null))
     on('#btn-new-session', 'click', () => this.actions.newConversation?.())
@@ -520,7 +523,22 @@ export class Hud {
     // astronaut needs its size sixty times a second, and asking the layout for it that
     // often is how a HUD starts costing frames.
     this._cardSize = { w: card.offsetWidth, h: card.offsetHeight }
-    this.$('#btn-open').disabled = thread.canOpen === false
+    const openBtn = this.$('#btn-open')
+    const canOpen = thread.canOpen !== false
+    // Grok Bot (and any harness without a deep link) gets Copy ID instead of a dead Open.
+    if (!canOpen && (thread.ref?.agentId || thread.openDisabledReason)) {
+      openBtn.disabled = false
+      openBtn.dataset.mode = 'copy-id'
+      openBtn.innerHTML = `${ICON.copy} Copy ID`
+      openBtn.title = thread.openDisabledReason || 'No open URL — copy the id instead'
+    } else {
+      openBtn.disabled = !canOpen
+      openBtn.dataset.mode = 'open'
+      openBtn.innerHTML = `${ICON.open} Open`
+      openBtn.title = canOpen
+        ? 'Open this thread in the harness it came from (Enter)'
+        : 'This thread has no open link'
+    }
   }
 
   /**

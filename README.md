@@ -193,7 +193,9 @@ flipping to its left rather than sliding under the sidebar, and never leaving th
 It is moved with a transform rather than with `left`/`top`, the one geometric change a
 browser makes without touching layout, so following a walking astronaut costs nothing.
 
-- **Open** hands the thread back to Claude Code and the desktop app comes forward.
+- **Open** returns a deep link from the harness. The browser navigates it on *this* device
+  (so an iPad on the LAN can open Claude there, if the app handles `claude://`). When the
+  click came from a browser on the Mac itself, the server also hands the URL to OS `open`.
 - **Archive** sets `isArchived` on Claude Code's own session record — the thread lands in
   Claude Code's Archived list, not just here — and the astronaut walks back up the ramp and
   boards the ship.
@@ -311,7 +313,9 @@ Sources, first match wins for the URL, then file:
 
 `data/fleet.sample.json` ships with a handful of fake agents. For a local demo, copy it to
 `data/fleet.json` (that file is gitignored, like the colony state). The harness is read-only
-in v1 — Open works only when an agent carries `openUrl`.
+in v1 — Open works when an agent carries `openUrl`, or when its id is a Cursor cloud agent
+(`bc-…`, mapped to `https://cursor.com/agents/<id>`). Local Grok Bot profile UUIDs have no
+public chat deep link yet; the button becomes **Copy ID** instead of a dead Open.
 
 On a LAN bind (`BOT_CROSSING_HOST=0.0.0.0` / `npx vite --host 0.0.0.0`), the same
 `data/fleet.json` on the machine running the server is what every client sees — the feed is

@@ -50,12 +50,14 @@ broken adapter costs you its own threads and nothing else. Prefer that over retu
 
 ### `openThread(ref)` / `newSession(dir)`
 
-Return `{ ok: true, url }` and the server hands that URL to the OS opener. `openThread` gets
-the `ref` from the thread it belongs to; `newSession` gets an absolute directory that the
-server has already checked still exists.
+Return `{ ok: true, url }` — the browser navigates that URL on the client, and the server
+also hands it to the OS opener when the click came from this Mac (not from a phone on the
+LAN). `openThread` gets the `ref` from the thread it belongs to; `newSession` gets an
+absolute directory that the server has already checked still exists.
 
-If your harness has no deep link, return `{ ok: false, error: '…' }` and say why — the UI
-shows the message rather than pretending the click worked.
+If your harness has no deep link, return `{ ok: false, error: '…' }` and set
+`canOpen: false` (optionally with `openDisabledReason`) — the UI turns Open into **Copy ID**
+rather than pretending the click worked.
 
 ### `setArchived(ref, archived)`
 

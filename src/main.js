@@ -148,7 +148,10 @@ const actions = {
     }
     try {
       const harness = harnessForProject(name)
-      await newSession(folder, harness)
+      const res = await newSession(folder, harness)
+      // Remote clients (iPad) get the deep link back; open it in *this* browser so the
+      // session lands on the device Rick is holding, not only on the mini.
+      if (res?.url) openClientUrl(res.url)
       hud.toast(`New thread in ${name} — opening ${harnessLabel(harness)}`)
       // It lands as an astronaut walking down the ramp, once it has a record to scan.
       setTimeout(poll, 6000)
@@ -185,14 +188,47 @@ const actions = {
     const thread = threads.find((t) => t.id === selectedId)
     if (!thread) return
     try {
-      await openThread(thread)
-      colony.astronauts.celebrate(thread.id)
-      hud.toast(`Opened in ${thread.harnessName || 'your harness'}`)
+      const res = await openThread(thread)
+      // Prefer navigating in this browser: works on the mini *and* on an iPad over LAN.
+      // The API still launches via OS `open` when the request came from this Mac.
+      if (res?.url) {
+        const opened = openClientUrl(res.url)
+        if (!opened) {
+          // Custom schemes can fail silently on iOS Safari — leave a copyable fallback.
+          const copied = await copyText(res.url)
+          hud.toast(
+            copied
+              ? 'Deep link copied — paste it here or in Notes to open on this device'
+              : res.url,
+            copied ? '' : 'err',
+          )
+        } else {
+          colony.astronauts.celebrate(thread.id)
+          hud.toast(`Opening in ${thread.harnessName || 'your harness'}`)
+        }
+      } else {
+        colony.astronauts.celebrate(thread.id)
+        hud.toast(`Opened in ${thread.harnessName || 'your harness'}`)
+      }
       // Opening is the thing that makes a thread no longer unread, so refresh shortly after.
       setTimeout(poll, 1800)
     } catch (err) {
       hud.toast(err.message || 'Could not open that thread', 'err')
     }
+  },
+
+  /** When a harness has no deep link (Grok Bot today), Open becomes Copy ID instead. */
+  copyThreadId: async () => {
+    const thread = threads.find((t) => t.id === selectedId)
+    if (!thread) return
+    const id = thread.ref?.agentId || thread.id
+    const copied = await copyText(id)
+    hud.toast(
+      copied
+        ? `Copied ${thread.harnessName || 'agent'} id`
+        : thread.openDisabledReason || 'Could not copy that id',
+      copied ? '' : 'err',
+    )
   },
 
   archiveThread: async () => {
@@ -490,7 +526,11 @@ window.addEventListener('keydown', (e) => {
       hud.setOrbit(false)
       break
     case 'Enter':
-      if (selectedId) actions.openThread()
+      if (selectedId) {
+        const t = threads.find((x) => x.id === selectedId)
+        if (t && t.canOpen === false) actions.copyThreadId()
+        else actions.openThread()
+      }
       break
     case 'a':
     case 'A':
@@ -692,6 +732,39 @@ boot()
 
 // Handy for poking at the running colony from the console.
 window.botCrossing = { engine, rig, colony, settings, hud, poll, get threads() { return threads } }
+
+/**
+ * Hand a harness deep link to *this* browser. https opens a tab; custom schemes
+ * (`claude://…`, `cursor://…`) use a synthetic <a> click — more reliable than
+ * window.open (popup blockers) or location.assign (some mobile WebViews swallow those).
+ */
+function openClientUrl(url) {
+  if (!url || typeof url !== 'string') return false
+  try {
+    if (/^https?:\/\//i.test(url)) {
+      const w = window.open(url, '_blank', 'noopener,noreferrer')
+      return Boolean(w)
+    }
+    const a = document.createElement('a')
+    a.href = url
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return copyFallback(text)
+  }
+}
 
 /** `execCommand('copy')` over a throwaway textarea — the copy that predates permissions. */
 function copyFallback(text) {

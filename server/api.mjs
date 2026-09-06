@@ -80,7 +80,6 @@ async function writeState(next) {
 }
 
 /**
-/**
  * Hand a `harness://…` deep link, or a folder, to whatever opens things on this OS. The
  * opener gets an argument list, never a shell string.
  *
@@ -190,6 +189,25 @@ function hostnameOf(value) {
 }
 
 /**
+ * Is the HTTP client this Mac itself? Loopback always is; so is any of our own LAN
+ * addresses (Safari on the mini talking to `http://10.50.0.x:5274/`). An iPad on the
+ * same LAN is not — its remoteAddress is the phone, not us — so OS `open` on the server
+ * would bring Claude forward on the mini while Rick is looking at the iPad. In that case
+ * we skip the server launch and hand the deep link back for the browser to navigate.
+ */
+function clientAddress(req) {
+  const raw = req.socket?.remoteAddress || ''
+  return String(raw).replace(/^::ffff:/, '')
+}
+
+function isSameMachine(req) {
+  const addr = clientAddress(req)
+  if (!addr) return false
+  if (addr === '127.0.0.1' || addr === '::1') return true
+  return LOCAL_HOSTS.has(addr)
+}
+
+/**
  * Only a page this server itself served may drive it. Two checks, against two different
  * attacks, both of which a localhost server with an `open`-the-desktop-app button is a
  * genuinely attractive target for:
@@ -268,8 +286,15 @@ export async function apiMiddleware(req, res, next) {
     if (url.pathname === '/api/open' && req.method === 'POST') {
       const { harness, ref } = await readJsonBody(req)
       const result = harnessOpenThread(harness, ref)
-      if (result.ok) launch(result.url)
-      return send(res, result.ok ? 200 : 400, result)
+      // Always return the URL so a remote browser (iPad on LAN) can navigate it itself.
+      // Only also hand it to the OS opener when the click came from this Mac — otherwise
+      // Claude/Cursor would pop up on the mini while Rick is staring at the phone.
+      let launched = false
+      if (result.ok && result.url && isSameMachine(req)) {
+        launch(result.url)
+        launched = true
+      }
+      return send(res, result.ok ? 200 : 400, { ...result, launched })
     }
 
     if ((url.pathname === '/api/new-session' || url.pathname === '/api/reveal') && req.method === 'POST') {
@@ -278,12 +303,23 @@ export async function apiMiddleware(req, res, next) {
       if (!dir) return send(res, 400, { ok: false, error: 'That folder is not on this machine any more' })
 
       if (url.pathname === '/api/reveal') {
+        // Finder/Explorer only exists on this Mac — remote clients get a clear refusal.
+        if (!isSameMachine(req)) {
+          return send(res, 400, {
+            ok: false,
+            error: 'Reveal only works from a browser on this Mac — the folder lives here, not on your phone',
+          })
+        }
         launch(dir)
-        return send(res, 200, { ok: true })
+        return send(res, 200, { ok: true, launched: true })
       }
       const result = harnessNewSession(harness || (await defaultHarness()), dir)
-      if (result.ok) launch(result.url)
-      return send(res, result.ok ? 200 : 400, result)
+      let launched = false
+      if (result.ok && result.url && isSameMachine(req)) {
+        launch(result.url)
+        launched = true
+      }
+      return send(res, result.ok ? 200 : 400, { ...result, launched })
     }
 
     if (url.pathname === '/api/archive' && req.method === 'POST') {

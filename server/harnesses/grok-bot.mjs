@@ -76,6 +76,20 @@ function mapState(raw) {
  * One Thread per agent. `project` is the agent name so each gets its own hex zone — the
  * colony groups by project, and Fleet wants one plot per Grok Bot rather than per chat.
  */
+/**
+ * Resolve a URL the browser (or OS opener) can navigate to.
+ *
+ * Prefer an explicit `openUrl` from the feed. Cursor *cloud* agents (`bc-…`) have a
+ * documented https open-by-id page; local Grok Bot profile ids are plain UUIDs with no
+ * public deep link (no grokbot://, and Cursor's deeplink catalog has no agent-chat route).
+ */
+function resolveOpenUrl(agent, id) {
+  const raw = typeof agent.openUrl === 'string' ? agent.openUrl.trim() : ''
+  if (raw) return raw
+  if (/^bc-[0-9a-f-]+$/i.test(id)) return `https://cursor.com/agents/${id}`
+  return ''
+}
+
 function toThread(agent) {
   if (!agent || typeof agent !== 'object') return null
   const id = String(agent.id || '').trim()
@@ -84,7 +98,7 @@ function toThread(agent) {
   const name = String(agent.name || id).trim() || id
   const description = String(agent.description || agent.summary || '').trim()
   const summary = String(agent.summary || agent.description || '').trim()
-  const openUrl = typeof agent.openUrl === 'string' && agent.openUrl.trim() ? agent.openUrl.trim() : ''
+  const openUrl = resolveOpenUrl(agent, id)
   const lastActivityAt = num(agent.lastActivityAt)
   const { running, unread, hasError } = mapState(String(agent.state || 'idle').toLowerCase())
 
@@ -117,6 +131,9 @@ function toThread(agent) {
     source: 'fleet',
     canOpen: Boolean(openUrl),
     canArchive: false,
+    openDisabledReason: openUrl
+      ? ''
+      : 'Grok Bot has no public chat deep link yet — copy the agent id instead',
     ref: { openUrl, agentId: id },
   }
 }
