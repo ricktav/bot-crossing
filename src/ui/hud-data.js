@@ -8,10 +8,23 @@ export { PRESETS } from '../core/settings.js'
  * Visual skins still come from planet.js (Luna/Mars/Terra/Fleet colours); the *filter* is
  * by host, not by scenery.
  */
-export const PLANETS_ORDER = ['mini', 'dm1', 'dm2', 'clawd', 'imac', 'fleet']
+export const PLANETS_ORDER = ['mini', 'dm1', 'dm2', 'clawd', 'imac', 'fleet', 'overview']
 
 /** Planet id for the Grok Bot world — coding harnesses stay off it, and vice versa. */
 export const FLEET_PLANET = 'fleet'
+
+/** All hosts + Fleet as neighbouring settlements on one map. */
+export const OVERVIEW_PLANET = 'overview'
+
+/** Suit / accent colours per host — Overview only. */
+export const HOST_COLORS = {
+  mini: 0xf0c060,
+  dm1: 0x4ecdc4,
+  dm2: 0xb794f6,
+  clawd: 0x68d391,
+  imac: 0x63b3ed,
+  fleet: 0x76e4f7,
+}
 
 /** Remote Claude plot/thread prefixes (and remotes.config.json ids). */
 export const HOST_PREFIXES = ['dm1', 'dm2', 'clawd', 'imac']
@@ -22,6 +35,10 @@ export const LEGACY_PLANETS = new Set(['moon', 'mars', 'terra'])
 export function normalizeWorld(planetId) {
   if (!planetId || LEGACY_PLANETS.has(planetId)) return 'mini'
   return PLANETS_ORDER.includes(planetId) ? planetId : 'mini'
+}
+
+export function isOverviewWorld(planetId) {
+  return normalizeWorld(planetId) === OVERVIEW_PLANET
 }
 
 /**
@@ -57,7 +74,7 @@ export function displayProjectName(project, worldId) {
   const raw = String(project || '')
   if (!raw) return 'unknown'
   const world = normalizeWorld(worldId)
-  if (world === FLEET_PLANET) return raw
+  if (world === OVERVIEW_PLANET || world === FLEET_PLANET) return raw
   if (world !== 'mini' && raw.startsWith(`${world}/`)) {
     return `${world}/${stripHostPrefix(raw)}`
   }

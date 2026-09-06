@@ -230,6 +230,58 @@ export function allocateCells(projects, previous = new Map()) {
   return out
 }
 
+/**
+ * Overview layout: each host gets its own settlement spiral, offset on the hex grid so
+ * towns sit next to each other instead of fighting for the same centre.
+ *
+ * @param projects [{ id, size, host }]
+ * @param previous Map id → cells (global coords)
+ */
+export const OVERVIEW_SECTORS = {
+  mini: { q: 0, r: 0 },
+  dm1: { q: 7, r: -3 },
+  dm2: { q: 4, r: 6 },
+  clawd: { q: -7, r: 4 },
+  imac: { q: -4, r: -6 },
+  fleet: { q: 0, r: -7 },
+}
+
+export function allocateOverviewCells(projects, previous = new Map()) {
+  const byHost = new Map()
+  for (const p of projects) {
+    const host = OVERVIEW_SECTORS[p.host] ? p.host : 'mini'
+    if (!byHost.has(host)) byHost.set(host, [])
+    byHost.get(host).push(p)
+  }
+
+  const out = new Map()
+  for (const [host, list] of byHost) {
+    const sector = OVERVIEW_SECTORS[host] || ORIGIN
+    const prevLocal = new Map()
+    for (const p of list) {
+      const cells = previous.get(p.id)
+      if (!cells?.length) continue
+      prevLocal.set(
+        p.id,
+        cells.map((c) => ({ q: c.q - sector.q, r: c.r - sector.r })),
+      )
+    }
+    // Cap sprawl in the overview sketch so dm2 does not swallow the map.
+    const capped = list.map((p) => ({
+      id: p.id,
+      size: Math.min(p.size, 21), // ≤ 3 cells (ceil(21/7))
+    }))
+    const local = allocateCells(capped, prevLocal)
+    for (const [id, cells] of local) {
+      out.set(
+        id,
+        cells.map((c) => ({ q: c.q + sector.q, r: c.r + sector.r })),
+      )
+    }
+  }
+  return out
+}
+
 /** Claim free neighbours until the blob is big enough, hugging its root cell first. */
 function growBlob(cells, want, free) {
   const root = cells[0]

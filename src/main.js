@@ -14,6 +14,8 @@ import {
   displayProjectName,
   hostOfThread,
   normalizeWorld,
+  isOverviewWorld,
+  OVERVIEW_PLANET,
 } from './ui/hud-data.js'
 import { loadKit } from './world/kit.js'
 import { crewRig, loadCrew } from './agents/crew.js'
@@ -667,6 +669,7 @@ function restoreWorldLayout(world) {
 /** One host world (or Fleet) at a time — dm2 must not swamp Mini. */
 function threadsForPlanet(list, planetId = settings.get('planet')) {
   const world = normalizeWorld(planetId)
+  if (world === OVERVIEW_PLANET) return list
   return list.filter((t) => hostOfThread(t) === world)
 }
 
@@ -713,7 +716,8 @@ async function poll() {
   if (polling) return
   polling = true
   try {
-    const res = await fetchThreads(normalizeWorld(settings.get('planet')))
+    const world = normalizeWorld(settings.get('planet'))
+    const res = await fetchThreads(world === OVERVIEW_PLANET ? 'all' : world)
     applyThreads(res.threads || [])
     hud.removeBoot()
   } catch (err) {

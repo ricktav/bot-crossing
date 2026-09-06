@@ -277,7 +277,7 @@ function slimThread(t) {
 }
 
 function filterThreadsByWorld(threads, world) {
-  if (!world || world === 'all') return threads
+  if (!world || world === 'all' || world === 'overview') return threads
   const w = String(world)
   return threads.filter((t) => {
     if (w === 'fleet') return t.harness === 'grok-bot'

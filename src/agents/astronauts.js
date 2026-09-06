@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 import { buildFaceAtlas, FACE, FACE_LOOPS, FRAME_COLS, FRAME_ROWS } from './faces.js'
+import { hostOfThread, isOverviewWorld, HOST_COLORS } from '../ui/hud-data.js'
 import { attachMatrixAt, decorateSkinned, frameFor } from './crew.js'
 
 /**
@@ -503,7 +504,13 @@ export class Astronauts {
       faceFrame: FACE.boot,
       faceTimer: 0,
       faceIndex: 0,
-      suit: SUIT_TONES[(hash(entry.id) >>> 3) % SUIT_TONES.length],
+      suit: (() => {
+        if (isOverviewWorld(this.settings?.get?.('planet'))) {
+          const host = hostOfThread(entry.thread)
+          return HOST_COLORS[host] || SUIT_TONES[(hash(entry.id) >>> 3) % SUIT_TONES.length]
+        }
+        return SUIT_TONES[(hash(entry.id) >>> 3) % SUIT_TONES.length]
+      })(),
       eye: new THREE.Color(1, 1, 1),
       trim: new THREE.Color(0xffffff),
       hop: 0,
@@ -544,6 +551,14 @@ export class Astronauts {
 
   _updateAgent(agent, entry) {
     agent.thread = entry.thread
+    if (isOverviewWorld(this.settings?.get?.('planet'))) {
+      const host = hostOfThread(entry.thread)
+      const nextSuit = HOST_COLORS[host]
+      if (nextSuit && agent.suit !== nextSuit) {
+        agent.suit = nextSuit
+        agent.colorDirty = true
+      }
+    }
     if (entry.site) {
       const moved = Math.hypot(entry.site.x - agent.site.x, entry.site.z - agent.site.z) > 0.05
       agent.site.copy(entry.site)

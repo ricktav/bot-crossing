@@ -116,6 +116,14 @@ export const PLANETS = {
     name: 'Fleet',
     blurb: 'Grok Bot dockyard — cold hulls, long shadows, cyan trim.',
   }),
+  // Sketch: every host as a neighbouring settlement. Wider colony floor so sectors fit.
+  overview: withSkin('terra', {
+    id: 'overview',
+    name: 'Overview',
+    blurb: 'All hosts + Fleet as separate settlements — host-coloured crew.',
+    // Stretch the flat buildable disk so sector towns stay on level ground.
+    colonyRadius: 78,
+  }),
 }
 
 const GROUND_SIZE = 340
@@ -151,7 +159,8 @@ export function createTerrain(planet, detail, seed = 1337) {
 
     // Flat where the colony lives, then hills that ramp in over the next forty metres —
     // so nothing ever builds on a slope but the horizon still has shape to it.
-    const outside = THREE.MathUtils.smoothstep(dist, COLONY_RADIUS - 6, COLONY_RADIUS + 40)
+    const flatR = planet.colonyRadius ?? COLONY_RADIUS
+    const outside = THREE.MathUtils.smoothstep(dist, flatR - 6, flatR + 40)
     const gentle = fbm(noise, x * 0.035, z * 0.035, 3) * 0.5
     const hills = fbm(noise, x * 0.012, z * 0.012, 4) * 9 + fbm(noise, x * 0.05, z * 0.05, 2) * 1.4
     let y = gentle * planet.roughness * (1 - outside) + hills * outside * planet.roughness
@@ -202,7 +211,8 @@ export function createTerrain(planet, detail, seed = 1337) {
 
 function sampleHeight(x, z, noise, craters, planet) {
   const dist = Math.hypot(x, z)
-  const outside = THREE.MathUtils.smoothstep(dist, COLONY_RADIUS - 6, COLONY_RADIUS + 40)
+  const flatR = planet.colonyRadius ?? COLONY_RADIUS
+    const outside = THREE.MathUtils.smoothstep(dist, flatR - 6, flatR + 40)
   const gentle = fbm(noise, x * 0.035, z * 0.035, 3) * 0.5
   const hills = fbm(noise, x * 0.012, z * 0.012, 4) * 9 + fbm(noise, x * 0.05, z * 0.05, 2) * 1.4
   let y = gentle * planet.roughness * (1 - outside) + hills * outside * planet.roughness

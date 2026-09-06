@@ -4,6 +4,7 @@ import { Sky } from '../world/sky.js'
 import {
   Plot,
   allocateCells,
+  allocateOverviewCells,
   shipPosition,
   createLabel,
   hashString,
@@ -13,6 +14,7 @@ import {
   PLOT_CELL,
 } from '../world/plots.js'
 import { createBuilding, buildingUniforms, Scaffolds } from '../world/buildings.js'
+import { hostOfThread, isOverviewWorld, HOST_COLORS, OVERVIEW_PLANET } from '../ui/hud-data.js'
 import { Ship } from '../world/ship.js'
 import { Astronauts } from '../agents/astronauts.js'
 import { Indicators, BADGE } from '../agents/indicators.js'
@@ -334,10 +336,20 @@ export class Colony {
     // The previous layout is an input, so a zone only moves when its own footprint changes
     // — never because a different repo gained or lost a thread. `plotCells` carries it
     // between polls, and the colony file carries it between sessions.
-    const layout = allocateCells(
-      projects.map(([name, list]) => ({ id: name, size: list.length })),
-      this.plotCells
-    )
+    const overview = isOverviewWorld(this.settings.get('planet'))
+    const layout = overview
+      ? allocateOverviewCells(
+          projects.map(([name, list]) => ({
+            id: name,
+            size: list.length,
+            host: hostOfThread(list[0]),
+          })),
+          this.plotCells,
+        )
+      : allocateCells(
+          projects.map(([name, list]) => ({ id: name, size: list.length })),
+          this.plotCells,
+        )
     // Remembered, not replaced: a project that has just lost its last thread keeps its
     // ground on the books, and the oldest entries fall off the end.
     for (const [name, cells] of layout) {
@@ -367,7 +379,12 @@ export class Colony {
       if (this.plots.has(name)) return
       const cells = layout.get(name)
       if (!cells?.length) return
-      const accent = this._pickAccent(name)
+      const host = hostOfThread(
+        projects.find(([n]) => n === name)?.[1]?.[0],
+      )
+      const accent = isOverviewWorld(this.settings.get('planet'))
+        ? HOST_COLORS[host] || this._pickAccent(name)
+        : this._pickAccent(name)
       const plot = new Plot({ id: name, name, index, cells, accent })
       plot.signature = wanted.get(name)
       this.plots.set(name, plot)
