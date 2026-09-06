@@ -91,6 +91,28 @@ body {
   pointer-events: none !important;
 }
 
+/* Floating unhide — sibling of .hud, not a child, so opacity/pointer-events traps miss it. */
+.hud-unhide {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top, 0px));
+  left: max(12px, env(safe-area-inset-left, 0px));
+  z-index: 20;
+  pointer-events: auto;
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  padding: 0;
+  border-radius: 12px;
+}
+
+.hud-unhide[hidden] {
+  display: none !important;
+}
+
+.hud-unhide svg {
+  width: 18px;
+  height: 18px;
+}
 .panel {
   background: var(--panel);
   backdrop-filter: blur(18px) saturate(1.3);

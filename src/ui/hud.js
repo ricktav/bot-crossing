@@ -65,6 +65,18 @@ export class Hud {
     this.el.innerHTML = TEMPLATE
     root.appendChild(this.el)
 
+    // Lives outside .hud so it survives .hud.hidden { opacity:0; pointer-events:none }.
+    // Touch devices have no H key — without this, hide is a one-way trip until reload.
+    this.unhideBtn = document.createElement('button')
+    this.unhideBtn.type = 'button'
+    this.unhideBtn.className = 'btn icon panel hud-unhide'
+    this.unhideBtn.id = 'btn-unhide'
+    this.unhideBtn.title = 'Show UI'
+    this.unhideBtn.setAttribute('aria-label', 'Show UI')
+    this.unhideBtn.innerHTML = ICON.eyeOff
+    this.unhideBtn.hidden = true
+    root.appendChild(this.unhideBtn)
+
     this.$ = (sel) => this.el.querySelector(sel)
 
     this._buildStats()
@@ -328,6 +340,7 @@ export class Hud {
     on('#btn-settings', 'click', () => this.toggleSettings())
     on('#btn-close-settings', 'click', () => this.toggleSettings(false))
     on('#btn-hide', 'click', () => this.toggleUi())
+    this.unhideBtn.addEventListener('click', () => this.toggleUi(true))
     on('#btn-help', 'click', () => this.toggleHelp())
     on('#btn-shot', 'click', () => this.actions.screenshot?.())
     on('#btn-home', 'click', () => this.actions.resetView?.())
@@ -739,6 +752,8 @@ export class Hud {
     this.visible = force ?? !this.visible
     this.el.classList.toggle('hidden', !this.visible)
     this.$('#btn-hide').innerHTML = this.visible ? ICON.eye : ICON.eyeOff
+    this.unhideBtn.hidden = this.visible
+    this.unhideBtn.innerHTML = ICON.eyeOff
     this.actions.uiVisibility?.(this.visible)
     if (!this.visible) this.toggleHelp(false)
     return this.visible
@@ -869,7 +884,7 @@ const TEMPLATE = `
     <div class="brand"><i class="dot"></i>Bot Crossing</div>
     <button class="btn icon ghost" id="btn-shot" title="Screenshot (P)">${ICON.camera}</button>
     <button class="btn icon ghost" id="btn-help" title="Help (?)">${ICON.help}</button>
-    <button class="btn icon ghost" id="btn-hide" title="Hide all UI (H)">${ICON.eye}</button>
+    <button class="btn icon ghost" id="btn-hide" title="Hide all UI (H) — tap the eye again to show">${ICON.eye}</button>
     <button class="btn icon ghost" id="btn-settings" title="Settings (S)" aria-pressed="false">${ICON.settings}</button>
   </header>
 
