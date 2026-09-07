@@ -538,6 +538,20 @@ export class Colony {
    * of buildings, which is exactly where the crew needs to walk.
    */
 
+  _setMeshFade(root, fade) {
+    if (!root) return
+    root.traverse((o) => {
+      const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : []
+      for (const m of mats) {
+        if (!m) continue
+        m.transparent = fade < 0.999
+        m.opacity = fade
+        m.depthWrite = fade > 0.85
+      }
+    })
+    root.visible = fade > 0.02
+  }
+
   /** Overview settlements sit past the default ±56m walk disk — grow it with the planet. */
   _syncNavBounds() {
     const half = this.planet?.navHalf || (isOverviewWorld(this.settings.get('planet')) ? 100 : 56)
