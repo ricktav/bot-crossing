@@ -51,7 +51,7 @@ function clipText(value, max) {
 function looksLikeSystemPrompt(text) {
   const t = String(text || '').replace(/\s+/g, ' ').trim()
   if (t.length < 36) return false
-  return /^(je bent|jij bent|you are|you\'re|you’re|your (task|role|job)|du bist|act as|system\s*:|here is your|hieronder )/i.test(t)
+    return /^(je bent|jij bent|je schrijft|je verrijkt|you are|you're|you’re|your (task|role|job)|du bist|act as|system\s*:|here is your|hieronder |antwoord met|return (only|exactly|json)|output (only|json))/i.test(t)
 }
 
 /** Prefer a real title; never surface a persona prompt as the thread name. */
