@@ -3,9 +3,20 @@ import './ui/styles.css'
 import { DEFAULT_PRESET, Settings, hasStoredSettings } from './core/settings.js'
 import { Engine } from './core/engine.js'
 import { CameraRig } from './core/camera.js'
-import { Colony, STATUS_LABEL, STATUS_ORDER, statusFor, transcriptProgress } from './game/colony.js'
+import { Colony, STATUS_LABEL, STATUS_ORDER, statusFor, staleMsForWorld, transcriptProgress } from './game/colony.js'
 import { Hud } from './ui/hud.js'
 import { PLANETS } from './world/planet.js'
+import {
+  FLEET_PLANET,
+  HOST_PREFIXES,
+  LEGACY_PLANETS,
+  PLANETS_ORDER,
+  displayProjectName,
+  hostOfThread,
+  normalizeWorld,
+  isOverviewWorld,
+  OVERVIEW_PLANET,
+} from './ui/hud-data.js'
 import { loadKit } from './world/kit.js'
 import { crewRig, loadCrew } from './agents/crew.js'
 import { TIMES } from './world/sky.js'
@@ -47,7 +58,7 @@ const engine = new Engine(settings).mount(app)
 const rig = new CameraRig(engine.camera, engine.canvas, settings)
 const colony = new Colony(engine.scene, settings, engine.camera, engine.renderer)
 
-let state = { archived: [], archivedAt: {}, opened: [], plots: {}, seen: {} }
+let state = { archived: [], archivedAt: {}, opened: [], plots: {}, plotsByWorld: {}, seen: {} }
 let threads = []
 /** Last legend built for the bottom bar, kept so the open zone's chip can light up between polls. */
 let legendProjects = []
@@ -86,8 +97,9 @@ const actions = {
   },
 
   cyclePlanet: () => {
-    const ids = Object.keys(PLANETS)
-    const next = ids[(ids.indexOf(settings.get('planet')) + 1) % ids.length]
+    const ids = PLANETS_ORDER.filter((id) => PLANETS[id])
+    const cur = normalizeWorld(settings.get('planet'))
+    const next = ids[(Math.max(0, ids.indexOf(cur)) + 1) % ids.length]
     settings.set('planet', next)
     hud.hint(`${PLANETS[next].name} — ${PLANETS[next].blurb}`)
   },
@@ -147,7 +159,10 @@ const actions = {
     }
     try {
       const harness = harnessForProject(name)
-      await newSession(folder, harness)
+      const res = await newSession(folder, harness)
+      // Remote clients (iPad) get the deep link back; open it in *this* browser so the
+      // session lands on the device Rick is holding, not only on the mini.
+      if (res?.url) openClientUrl(res.url)
       hud.toast(`New thread in ${name} — opening ${harnessLabel(harness)}`)
       // It lands as an astronaut walking down the ramp, once it has a record to scan.
       setTimeout(poll, 6000)
@@ -184,14 +199,76 @@ const actions = {
     const thread = threads.find((t) => t.id === selectedId)
     if (!thread) return
     try {
-      await openThread(thread)
-      colony.astronauts.celebrate(thread.id)
-      hud.toast(`Opened in ${thread.harnessName || 'your harness'}`)
+      // Remotes (and anything already carrying a claudemux page) prefer the web Open path.
+      const preferWeb = Boolean(thread.claudemuxUrl) && thread.canOpen === false
+      const res = await openThread(thread, { preferWeb })
+      // Prefer navigating in this browser: works on the mini *and* on an iPad over LAN.
+      // The API still launches via OS `open` when the request came from this Mac.
+      if (res?.url) {
+        const opened = openClientUrl(res.url)
+        if (!opened) {
+          // Custom schemes can fail silently on iOS Safari — leave a copyable fallback.
+          const copied = await copyText(res.url)
+          hud.toast(
+            copied
+              ? 'Deep link copied — paste it here or in Notes to open on this device'
+              : res.url,
+            copied ? '' : 'err',
+          )
+        } else {
+          colony.astronauts.celebrate(thread.id)
+          hud.toast(
+            res.web
+              ? 'Opening claudemux page'
+              : `Opening in ${thread.harnessName || 'your harness'}`,
+          )
+        }
+      } else {
+        colony.astronauts.celebrate(thread.id)
+        hud.toast(`Opened in ${thread.harnessName || 'your harness'}`)
+      }
       // Opening is the thing that makes a thread no longer unread, so refresh shortly after.
       setTimeout(poll, 1800)
     } catch (err) {
       hud.toast(err.message || 'Could not open that thread', 'err')
     }
+  },
+
+  /** Claudemux project page (or Fleet report) — navigates in this browser over LAN. */
+  openWeb: async () => {
+    const thread = threads.find((t) => t.id === selectedId)
+    if (!thread) return
+    const direct = thread.claudemuxUrl || thread.fleetReportUrl
+    if (direct) {
+      const opened = openClientUrl(direct)
+      hud.toast(opened ? 'Opening web page' : direct, opened ? '' : 'err')
+      return
+    }
+    try {
+      const res = await openThread(thread, { preferWeb: true })
+      if (res?.url) {
+        const opened = openClientUrl(res.url)
+        hud.toast(opened ? 'Opening web page' : res.url, opened ? '' : 'err')
+      } else {
+        hud.toast('No claudemux page for that project', 'err')
+      }
+    } catch (err) {
+      hud.toast(err.message || 'No claudemux page for that project', 'err')
+    }
+  },
+
+  /** When a harness has no deep link (Grok Bot today), Open becomes Copy ID instead. */
+  copyThreadId: async () => {
+    const thread = threads.find((t) => t.id === selectedId)
+    if (!thread) return
+    const id = thread.ref?.agentId || thread.id
+    const copied = await copyText(id)
+    hud.toast(
+      copied
+        ? `Copied ${thread.harnessName || 'agent'} id`
+        : thread.openDisabledReason || 'Could not copy that id',
+      copied ? '' : 'err',
+    )
   },
 
   archiveThread: async () => {
@@ -247,7 +324,9 @@ function select(id, { fly = false } = {}) {
   const thread = threads.find((t) => t.id === id) || agent.thread
   hud.setSelection(agent, thread)
   // Picking somebody is also picking the zone they are standing on: the sidebar follows.
-  if (thread?.project && colony.plots.has(thread.project)) selectedProject = thread.project
+  // Always set selectedProject from the thread — do not require plots.has first (remote /
+  // fleet selection used to skip setProject when the plot map lagged a frame).
+  if (thread?.project) selectedProject = thread.project
   syncProject()
   if (fly) {
     rig.focus(new THREE.Vector3(agent.pos.x, 0, agent.pos.z), { distance: Math.min(rig.desiredDistance, 26) })
@@ -318,22 +397,25 @@ function pathForProject(name) {
 
 /** Push the open zone's current contents at the sidebar. Closes it if the zone is gone. */
 function syncProject() {
-  const plot = selectedProject ? colony.plots.get(selectedProject) : null
-  if (!plot) {
-    selectedProject = null
+  const name = selectedProject
+  if (!name) {
     hud.setProject(null)
     hud.setLegend(legendProjects, null)
     return
   }
+  const plot = colony.plots.get(name)
+  const world = normalizeWorld(settings.get('planet'))
+  // Still show the sidebar when we know the project name from a selection, even if the
+  // plot mesh is briefly missing (host switch / first frame after filter).
   const now = Date.now()
   const list = [...colony.threads.values()]
-    .filter((thread) => thread.project === plot.name)
+    .filter((thread) => thread.project === name)
     .map((thread) => ({
       id: thread.id,
       title: thread.title,
       worktree: thread.worktree,
       lastActivityAt: thread.lastActivityAt,
-      status: statusFor(thread, now),
+      status: statusFor(thread, now, staleMsForWorld(settings.get('planet'))),
     }))
     // Whoever wants something first, then most recently touched — the same order of
     // importance the badges use above their heads.
@@ -342,10 +424,23 @@ function syncProject() {
       return rank || (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0)
     })
 
+  // If the filtered world has no threads for this name and no plot, close the drill-in.
+  if (!plot && !list.length) {
+    selectedProject = null
+    hud.setProject(null)
+    hud.setLegend(legendProjects, null)
+    return
+  }
+
+  const sample = list[0] && threads.find((t) => t.id === list[0].id)
+  const host = sample ? hostOfThread(sample) : hostOfThread({ project: name, harness: world === FLEET_PLANET ? 'grok-bot' : 'claude-code' })
+
   hud.setProject({
-    name: plot.name,
-    accent: plot.accent,
-    path: pathForProject(plot.name),
+    name: displayProjectName(name, world),
+    rawName: name,
+    host: host === 'mini' || host === FLEET_PLANET ? '' : host,
+    accent: plot?.accent ?? 0x6a7a8a,
+    path: pathForProject(name),
     threads: list,
     selectedId,
   })
@@ -489,7 +584,12 @@ window.addEventListener('keydown', (e) => {
       hud.setOrbit(false)
       break
     case 'Enter':
-      if (selectedId) actions.openThread()
+      if (selectedId) {
+        const t = threads.find((x) => x.id === selectedId)
+        if (t && t.canOpen === false && (t.claudemuxUrl || t.fleetReportUrl)) actions.openWeb()
+        else if (t && t.canOpen === false) actions.copyThreadId()
+        else actions.openThread()
+      }
       break
     case 'a':
     case 'A':
@@ -538,17 +638,57 @@ window.addEventListener('keydown', (e) => {
 
 // ── data ──────────────────────────────────────────────────────────────────────────────
 
+/** Active host world — sticky layouts are stored per world so switching does not collide. */
+let activeWorld = normalizeWorld(settings.get('planet'))
+
+function migratePlotsByWorld(state) {
+  if (!state.plotsByWorld || typeof state.plotsByWorld !== 'object') state.plotsByWorld = {}
+  const by = state.plotsByWorld
+  for (const id of PLANETS_ORDER) by[id] = by[id] || {}
+  // Do NOT copy coordinates from the pre-split shared map: those tiles were laid among
+  // every host at once, so slicing them by prefix leaves disjoint hex islands. Empty
+  // worlds re-pack contiguous blobs via allocateCells on the next roster.
+  const hasAny = PLANETS_ORDER.some((id) => by[id] && Object.keys(by[id]).length)
+  if (hasAny) return
+  // Drop the flat map so we never re-import scattered cells on a later boot.
+  state.plots = {}
+}
+
+function saveActiveWorldLayout() {
+  state.plotsByWorld = state.plotsByWorld || {}
+  const layout = colony.layoutForSave()
+  state.plotsByWorld[activeWorld] = layout
+  state.plots = layout
+}
+
+function restoreWorldLayout(world) {
+  const by = state.plotsByWorld || {}
+  colony.restoreLayout(by[world] || {})
+}
+
+/** One host world (or Fleet) at a time — dm2 must not swamp Mini. */
+function threadsForPlanet(list, planetId = settings.get('planet')) {
+  const world = normalizeWorld(planetId)
+  const now = Date.now()
+  const staleMs = staleMsForWorld(world)
+  // Host worlds: awake ≤14d. Overview: awake ≤7d. Sleeping ghosts stay off the map.
+  const awake = (t) => statusFor(t, now, staleMs) !== 'sleeping'
+  if (world === OVERVIEW_PLANET) return list.filter(awake)
+  return list.filter((t) => hostOfThread(t) === world && awake(t))
+}
+
 function applyThreads(list) {
   threads = list
+  const visible = threadsForPlanet(list)
   const archivedSet = new Set(state.archived)
-  const stats = colony.setThreads(list, archivedSet)
+  const stats = colony.setThreads(visible, archivedSet)
   hud.setStats(stats)
 
   legendProjects = colony.plotOrder
     .map((plot) => ({
       name: plot.name,
       accent: plot.accent,
-      count: list.filter((t) => !t.archived && !archivedSet.has(t.id) && t.project === plot.name).length,
+      count: visible.filter((t) => !t.archived && !archivedSet.has(t.id) && t.project === plot.name).length,
       urgent: colony.urgentPlots?.has(plot.id) ?? false,
     }))
     .sort((a, b) => b.count - a.count)
@@ -568,6 +708,8 @@ function applyThreads(list) {
   const signature = JSON.stringify(layout)
   if (signature !== lastLayout) {
     lastLayout = signature
+    state.plotsByWorld = state.plotsByWorld || {}
+    state.plotsByWorld[activeWorld] = layout
     state.plots = layout
     queueSave()
   }
@@ -578,7 +720,8 @@ async function poll() {
   if (polling) return
   polling = true
   try {
-    const res = await fetchThreads()
+    const world = normalizeWorld(settings.get('planet'))
+    const res = await fetchThreads(world === OVERVIEW_PLANET ? 'all' : world)
     applyThreads(res.threads || [])
     hud.removeBoot()
   } catch (err) {
@@ -610,11 +753,22 @@ async function boot() {
     fetchState()
       .then((s) => {
         state = s
+        state.plotsByWorld = state.plotsByWorld || {}
+        migratePlotsByWorld(state)
+        // Legacy scenery ids (moon/mars/terra) → Mini host world.
+        if (LEGACY_PLANETS.has(settings.get('planet'))) settings.values.planet = 'mini'
+        if (state.settings?.planet && LEGACY_PLANETS.has(state.settings.planet)) {
+          state.settings = { ...state.settings, planet: 'mini' }
+        }
+        activeWorld = normalizeWorld(settings.get('planet'))
         // Before the first roster: zones come back to the ground they were on last time.
-        colony.restoreLayout(state.plots)
+        restoreWorldLayout(activeWorld)
         // And the settings, but only for a browser that has none of its own — an explicit
         // choice made here always outranks the file.
         if (!hasStoredSettings() && state.settings) settings.applyAll(state.settings)
+        if (LEGACY_PLANETS.has(settings.get('planet'))) settings.values.planet = 'mini'
+        activeWorld = normalizeWorld(settings.get('planet'))
+        restoreWorldLayout(activeWorld)
       })
       .catch(() => {
         /* first run, or the file is gone — an empty colony state is a valid one */
@@ -654,9 +808,26 @@ settings.onChange((changed, scope) => {
   state.settings = { ...settings.values }
   queueSave()
   if (scope.render || changed.has('fov')) engine.applySettings()
+  if (changed.has('planet')) {
+    let next = normalizeWorld(settings.get('planet'))
+    if (next !== settings.get('planet')) {
+      // Write through without re-entering onChange.
+      settings.values.planet = next
+      state.settings = { ...settings.values }
+    }
+    saveActiveWorldLayout()
+    activeWorld = next
+    restoreWorldLayout(activeWorld)
+    selectedId = null
+    selectedProject = null
+    colony.astronauts.setSelected(null)
+    hud.setSelection(null, null)
+    lastLayout = ''
+  }
   colony.onSettingsChanged(changed, scope)
   if (changed.has('showFps')) hud.syncSettings()
-  if (changed.has('maxAgents')) applyThreads(threads)
+  if (changed.has('planet')) poll()
+  else if (changed.has('maxAgents')) applyThreads(threads)
 })
 
 // ── frame ─────────────────────────────────────────────────────────────────────────────
@@ -684,6 +855,39 @@ boot()
 
 // Handy for poking at the running colony from the console.
 window.botCrossing = { engine, rig, colony, settings, hud, poll, get threads() { return threads } }
+
+/**
+ * Hand a harness deep link to *this* browser. https opens a tab; custom schemes
+ * (`claude://…`, `cursor://…`) use a synthetic <a> click — more reliable than
+ * window.open (popup blockers) or location.assign (some mobile WebViews swallow those).
+ */
+function openClientUrl(url) {
+  if (!url || typeof url !== 'string') return false
+  try {
+    if (/^https?:\/\//i.test(url)) {
+      const w = window.open(url, '_blank', 'noopener,noreferrer')
+      return Boolean(w)
+    }
+    const a = document.createElement('a')
+    a.href = url
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {
+    return copyFallback(text)
+  }
+}
 
 /** `execCommand('copy')` over a throwaway textarea — the copy that predates permissions. */
 function copyFallback(text) {

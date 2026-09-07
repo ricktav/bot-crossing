@@ -5,9 +5,11 @@ Codex CLI, OpenCode, and so on. Bot Crossing does not care which one you use: it
 harness present on the machine for its threads and draws whatever comes back.
 
 Adding one is meant to be **one new file in this directory**, plus one line in `index.mjs`.
-Nothing in `server/scan.mjs`, `server/api.mjs`, or anywhere under `src/` should need to change.
-If you find yourself editing those to land a harness, that is a bug in this seam — please say so
-in the PR, because the next person will hit it too.
+Nothing in `server/scan.mjs`, `server/api.mjs`, or anywhere under `src/` should need to change
+for a coding harness that joins the existing colony. If you find yourself editing those to land
+a harness, that is a bug in this seam — please say so in the PR, because the next person will
+hit it too. (Grok Bot is the deliberate exception: it adds a **Fleet** planet and a harness
+filter so those agents stay off Luna/Mars/Terra.)
 
 ## The shape of it
 
@@ -48,12 +50,14 @@ broken adapter costs you its own threads and nothing else. Prefer that over retu
 
 ### `openThread(ref)` / `newSession(dir)`
 
-Return `{ ok: true, url }` and the server hands that URL to the OS opener. `openThread` gets
-the `ref` from the thread it belongs to; `newSession` gets an absolute directory that the
-server has already checked still exists.
+Return `{ ok: true, url }` — the browser navigates that URL on the client, and the server
+also hands it to the OS opener when the click came from this Mac (not from a phone on the
+LAN). `openThread` gets the `ref` from the thread it belongs to; `newSession` gets an
+absolute directory that the server has already checked still exists.
 
-If your harness has no deep link, return `{ ok: false, error: '…' }` and say why — the UI
-shows the message rather than pretending the click worked.
+If your harness has no deep link, return `{ ok: false, error: '…' }` and set
+`canOpen: false` (optionally with `openDisabledReason`) — the UI turns Open into **Copy ID**
+rather than pretending the click worked.
 
 ### `setArchived(ref, archived)`
 
@@ -137,6 +141,9 @@ Verified on a real machine:
   (`%APPDATA%\Claude\claude-code-sessions\…` on Windows); CLI transcripts in
   `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl`; live processes in
   `~/.claude/sessions/*.json`. Implemented in `claude-code.mjs`.
+- **Grok Bot** — JSON feed of agents (`data/fleet.json`, or `GROK_BOT_FLEET_JSON` /
+  `GROK_BOT_FLEET_URL`). Implemented in `grok-bot.mjs`. Agents appear on the **Fleet**
+  world only (filtered in `src/main.js`), one plot per agent.
 - **Codex CLI** — transcripts in `~/.codex/sessions/YYYY/MM/DD/rollout-<iso>-<uuid>.jsonl`,
   with records shaped `{ timestamp, type, payload }`, and what looks like an index at
   `~/.codex/session_index.jsonl`. Not implemented yet.
@@ -173,3 +180,11 @@ a new one should clear too:
 4. `npm run dev`, then confirm the astronauts appear on the right plots, the thread card fills
    in, and Open does what you expect.
 5. Archive one thread and check it shows as archived **in the harness's own UI**, not just here.
+
+## Remote Claude mirrors
+
+Claude Code on this fork can also scan rsync mirrors under `data/remotes/<host>/.claude/projects`
+(see `server/remotes.config.json` and `server/lib/remote-claude.mjs`). Those threads keep
+`harness: claude-code` but carry `remote: true`, host-prefixed `project` names, and
+`canOpen: false` so a deep link never resumes the wrong machine's session.
+

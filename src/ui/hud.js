@@ -65,6 +65,18 @@ export class Hud {
     this.el.innerHTML = TEMPLATE
     root.appendChild(this.el)
 
+    // Lives outside .hud so it survives .hud.hidden { opacity:0; pointer-events:none }.
+    // Touch devices have no H key — without this, hide is a one-way trip until reload.
+    this.unhideBtn = document.createElement('button')
+    this.unhideBtn.type = 'button'
+    this.unhideBtn.className = 'btn icon panel hud-unhide'
+    this.unhideBtn.id = 'btn-unhide'
+    this.unhideBtn.title = 'Show UI'
+    this.unhideBtn.setAttribute('aria-label', 'Show UI')
+    this.unhideBtn.innerHTML = ICON.eyeOff
+    this.unhideBtn.hidden = true
+    root.appendChild(this.unhideBtn)
+
     this.$ = (sel) => this.el.querySelector(sel)
 
     this._buildStats()
@@ -174,7 +186,7 @@ export class Hud {
     body.appendChild(perf)
 
     // World.
-    const world = group('Planet')
+    const world = group('Host world')
     const planets = document.createElement('div')
     planets.className = 'planets'
     for (const id of PLANETS_ORDER) {
@@ -328,6 +340,7 @@ export class Hud {
     on('#btn-settings', 'click', () => this.toggleSettings())
     on('#btn-close-settings', 'click', () => this.toggleSettings(false))
     on('#btn-hide', 'click', () => this.toggleUi())
+    this.unhideBtn.addEventListener('click', () => this.toggleUi(true))
     on('#btn-help', 'click', () => this.toggleHelp())
     on('#btn-shot', 'click', () => this.actions.screenshot?.())
     on('#btn-home', 'click', () => this.actions.resetView?.())
@@ -335,7 +348,12 @@ export class Hud {
     on('#btn-orbit', 'click', () => this.setOrbit(this.actions.toggleOrbit?.()))
     on('#btn-planet', 'click', () => this.actions.cyclePlanet?.())
     on('#btn-time', 'click', () => this.actions.cycleTime?.())
-    on('#btn-open', 'click', () => this.actions.openThread?.())
+    on('#btn-open', 'click', () => {
+      if (this.$('#btn-open').dataset.mode === 'copy-id') this.actions.copyThreadId?.()
+      else if (this.$('#btn-open').dataset.mode === 'web') this.actions.openWeb?.()
+      else this.actions.openThread?.()
+    })
+    on('#btn-web', 'click', () => this.actions.openWeb?.())
     on('#btn-archive', 'click', () => this.actions.archiveThread?.())
     on('#btn-deselect', 'click', () => this.actions.select?.(null))
     on('#btn-new-session', 'click', () => this.actions.newConversation?.())
@@ -430,8 +448,13 @@ export class Hud {
     swatch.style.color = hex(project.accent) // the halo is `currentColor`
     this.$('.side .name').textContent = project.name
     const path = this.$('.side .path')
-    path.textContent = project.path ? shortPath(project.path) : 'folder unknown'
-    path.title = project.path || ''
+    const pathLabel = project.path
+      ? shortPath(project.path)
+      : project.host
+        ? `on ${project.host}`
+        : 'folder unknown'
+    path.textContent = pathLabel
+    path.title = project.path || project.rawName || pathLabel
     // Nothing to open a new thread in, and nothing to reveal, without a folder on disk.
     this.$('#btn-new-session').disabled = !project.path
     this.$('#btn-reveal').disabled = !project.path
@@ -491,12 +514,21 @@ export class Hud {
     if (!agent || !thread) {
       card.classList.remove('on')
       this.selected = null
+      const webBtn = this.$('#btn-web')
+      if (webBtn) {
+        webBtn.hidden = true
+        webBtn.disabled = true
+      }
       return
     }
     this.selected = { agent, thread }
     card.classList.add('on')
 
     this.$('.thread-pop .title').textContent = thread.title || 'Untitled thread'
+    const preview = this.$('.thread-pop .preview')
+    const blurb = (thread.preview || '').trim()
+    preview.textContent = blurb
+    preview.hidden = !blurb
     const status = STATUS_LABEL[agent.status] || agent.status
     const meta = this.$('.thread-pop .meta')
     const bits = [
@@ -516,7 +548,41 @@ export class Hud {
     // astronaut needs its size sixty times a second, and asking the layout for it that
     // often is how a HUD starts costing frames.
     this._cardSize = { w: card.offsetWidth, h: card.offsetHeight }
-    this.$('#btn-open').disabled = thread.canOpen === false
+    const openBtn = this.$('#btn-open')
+    const webBtn = this.$('#btn-web')
+    const canOpen = thread.canOpen !== false
+    const webUrl = thread.claudemuxUrl || thread.fleetReportUrl || ''
+    // Grok Bot (and any harness without a deep link) gets Copy ID instead of a dead Open.
+    // Remotes with a claudemux page get Open → web instead.
+    if (!canOpen && webUrl && !thread.ref?.agentId) {
+      openBtn.disabled = false
+      openBtn.dataset.mode = 'web'
+      openBtn.innerHTML = `${ICON.open} Open`
+      openBtn.title = 'Open the claudemux page for this project (Enter)'
+    } else if (!canOpen && (thread.ref?.agentId || thread.openDisabledReason)) {
+      openBtn.disabled = false
+      openBtn.dataset.mode = 'copy-id'
+      openBtn.innerHTML = `${ICON.copy} Copy ID`
+      openBtn.title = thread.openDisabledReason || 'No open URL — copy the id instead'
+    } else {
+      openBtn.disabled = !canOpen
+      openBtn.dataset.mode = 'open'
+      openBtn.innerHTML = `${ICON.open} Open`
+      openBtn.title = canOpen
+        ? 'Open this thread in the harness it came from (Enter)'
+        : 'This thread has no open link'
+    }
+    if (webBtn) {
+      const showWeb = Boolean(webUrl) && openBtn.dataset.mode !== 'web'
+      webBtn.hidden = !showWeb
+      webBtn.disabled = !showWeb
+      webBtn.title = thread.claudemuxUrl
+        ? 'Open claudemux project page in this browser'
+        : 'Open claudemux fleet report'
+      webBtn.innerHTML = thread.fleetReportUrl && !thread.claudemuxUrl
+        ? `${ICON.globe} Fleet report`
+        : `${ICON.globe} Web`
+    }
   }
 
   /**
@@ -686,6 +752,8 @@ export class Hud {
     this.visible = force ?? !this.visible
     this.el.classList.toggle('hidden', !this.visible)
     this.$('#btn-hide').innerHTML = this.visible ? ICON.eye : ICON.eyeOff
+    this.unhideBtn.hidden = this.visible
+    this.unhideBtn.innerHTML = ICON.eyeOff
     this.actions.uiVisibility?.(this.visible)
     if (!this.visible) this.toggleHelp(false)
     return this.visible
@@ -816,7 +884,7 @@ const TEMPLATE = `
     <div class="brand"><i class="dot"></i>Bot Crossing</div>
     <button class="btn icon ghost" id="btn-shot" title="Screenshot (P)">${ICON.camera}</button>
     <button class="btn icon ghost" id="btn-help" title="Help (?)">${ICON.help}</button>
-    <button class="btn icon ghost" id="btn-hide" title="Hide all UI (H)">${ICON.eye}</button>
+    <button class="btn icon ghost" id="btn-hide" title="Hide all UI (H) — tap the eye again to show">${ICON.eye}</button>
     <button class="btn icon ghost" id="btn-settings" title="Settings (S)" aria-pressed="false">${ICON.settings}</button>
   </header>
 
@@ -856,7 +924,7 @@ const TEMPLATE = `
   <button class="btn icon" id="btn-next" title="Next astronaut waiting on you (N)">${ICON.next}</button>
   <div class="sep"></div>
   <button class="btn icon" id="btn-orbit" title="Orbit mode — sweep around the colony (O)" aria-pressed="false">${ICON.orbit}</button>
-  <button class="btn icon" id="btn-planet" title="Change planet (Tab)">${ICON.globe}</button>
+  <button class="btn icon" id="btn-planet" title="Change host world (Tab)">${ICON.globe}</button>
   <button class="btn icon" id="btn-time" title="Change the time of day (L)">${ICON.sun}</button>
 </div>
 
@@ -871,6 +939,7 @@ const TEMPLATE = `
     <div class="avatar"><canvas></canvas></div>
     <div class="info">
       <div class="title"></div>
+      <div class="preview"></div>
       <div class="meta"></div>
     </div>
     <button class="btn icon ghost" id="btn-deselect" title="Deselect (Esc)">${ICON.close}</button>
@@ -878,6 +947,7 @@ const TEMPLATE = `
   <div class="progress"><i></i></div>
   <div class="pair">
     <button class="btn primary" id="btn-open" title="Open this thread in the harness it came from (Enter)">${ICON.open} Open</button>
+    <button class="btn" id="btn-web" hidden disabled title="Open claudemux page">${ICON.globe} Web</button>
     <button class="btn" id="btn-archive" title="Archive — this astronaut walks back to the ship (A)">${ICON.archive} Archive</button>
   </div>
 </div>
@@ -889,7 +959,7 @@ const TEMPLATE = `
 <div class="help">
   <div class="sheet panel">
     <h2>Bot Crossing</h2>
-    <p class="sub">Every coding-agent thread on this Mac is an astronaut. They walk out of the ship, claim a plot for their repo, and build. Click one to open its thread; click a zone — its deck or its name — for the repo itself, and start a new conversation there. Navigation works like Google Earth — drag the ground itself, right-drag to tilt, scroll to zoom in on whatever is under the cursor.</p>
+    <p class="sub">Every coding-agent thread is an astronaut. Tab switches host worlds (Mini, dm1, dm2, clawd, iMac) and Fleet. They walk out of the ship, claim a plot for their repo, and build. Click one to open its thread; click a zone — its deck or its name — for the repo itself, and start a new conversation there. Navigation works like Google Earth — drag the ground itself, right-drag to tilt, scroll to zoom in on whatever is under the cursor.</p>
     <div class="cols">
       <div>
         <div class="k"><span>Drag the ground</span><kbd>drag</kbd></div>
@@ -908,7 +978,7 @@ const TEMPLATE = `
         <div class="k"><span>Archive</span><kbd>A</kbd></div>
         <div class="k"><span>New conversation</span><kbd>C</kbd></div>
         <div class="k"><span>Orbit mode</span><kbd>O</kbd></div>
-        <div class="k"><span>Change planet</span><kbd>Tab</kbd></div>
+        <div class="k"><span>Next host world</span><kbd>Tab</kbd></div>
         <div class="k"><span>Time of day</span><kbd>L</kbd></div>
         <div class="k"><span>Deselect</span><kbd>Esc</kbd></div>
         <div class="k"><span>This sheet</span><kbd>?</kbd></div>

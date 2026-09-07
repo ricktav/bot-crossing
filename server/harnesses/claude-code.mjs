@@ -16,6 +16,7 @@ import os from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { exists, jsonLines, listDirs, listFiles, num, readHead } from '../lib/fsutil.mjs'
+import { listRemoteRoots, maybeSyncRemotes } from '../lib/remote-claude.mjs'
 
 const execFileAsync = promisify(execFile)
 const HOME = os.homedir()
@@ -37,10 +38,52 @@ function desktopDataDir() {
 
 /** Where the Claude desktop app keeps one JSON record per thread. */
 const DESKTOP_SESSIONS = path.join(desktopDataDir(), 'claude-code-sessions')
+/** Keep API payloads tiny — iPad Safari dies on multi‑MB /api/threads. */
+const TITLE_MAX = 120
+const PREVIEW_MAX = 160
+function clipText(value, max) {
+  const s = String(value || '').replace(/\s+/g, ' ').trim()
+  if (s.length <= max) return s
+  return s.slice(0, max - 1).trimEnd() + '…'
+}
+
+/** Role/system preambles are not titles — linkstash workers all share one. */
+function looksLikeSystemPrompt(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim()
+  if (t.length < 36) return false
+    return /^(je bent|jij bent|je schrijft|je verrijkt|you are|you're|you’re|your (task|role|job)|du bist|act as|system\s*:|here is your|hieronder |antwoord met|return (only|exactly|json)|output (only|json))/i.test(t)
+}
+
+/** Prefer a real title; never surface a persona prompt as the thread name. */
+function resolveTitle(candidates, project, sessionId) {
+  for (const raw of candidates) {
+    const s = String(raw || '').replace(/\s+/g, ' ').trim()
+    if (!s || looksLikeSystemPrompt(s)) continue
+    return clipText(s, TITLE_MAX)
+  }
+  const base = String(project || '').split('/').filter(Boolean).pop() || 'thread'
+  const tag = String(sessionId || '').replace(/^.*[_:-]/, '').slice(-4)
+  return clipText(tag ? `${base} · ${tag}` : base, TITLE_MAX)
+}
+
+
 /** Where the CLI keeps the raw transcript: ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl */
 const CLI_PROJECTS = path.join(HOME, '.claude', 'projects')
 /** One file per live CLI process: {pid, sessionId, cwd, ...}. Stale files outlive their pid. */
 const CLI_LIVE = path.join(HOME, '.claude', 'sessions')
+
+/** Local root — desktop + CLI on this Mac. Remotes are CLI mirrors under data/remotes/. */
+function localRoot() {
+  return {
+    id: 'local',
+    label: '',
+    remote: false,
+    cliProjects: CLI_PROJECTS,
+    cliLive: CLI_LIVE,
+    desktopSessions: DESKTOP_SESSIONS,
+    openDisabledReason: '',
+  }
+}
 
 const HEAD_BYTES = 192 * 1024
 
@@ -125,10 +168,10 @@ function decodeProjectDir(name) {
   return name.startsWith('-') ? '/' + name.slice(1).replace(/-/g, '/') : name
 }
 
-/** Index every CLI transcript on disk, keyed by session id. */
-async function scanTranscripts() {
+/** Index every CLI transcript under a projects root, keyed by session id. */
+async function scanTranscripts(cliProjects) {
   const byId = new Map()
-  for (const projectDir of await listDirs(CLI_PROJECTS)) {
+  for (const projectDir of await listDirs(cliProjects)) {
     for (const file of await listFiles(projectDir, (n) => n.endsWith('.jsonl'))) {
       const id = path.basename(file, '.jsonl')
       let stat
@@ -162,9 +205,11 @@ async function transcriptMeta(entry) {
  * Sessions with a CLI process actually alive right now. The registry keeps files for
  * processes that have exited, so every pid is probed before it counts.
  */
-async function scanLiveSessions() {
+async function scanLiveSessions(cliLive) {
   const live = new Set()
-  for (const file of await listFiles(CLI_LIVE, (n) => n.endsWith('.json'))) {
+  // Remote mirrors carry another machine's pids — probing them here is meaningless.
+  if (!cliLive) return live
+  for (const file of await listFiles(cliLive, (n) => n.endsWith('.json'))) {
     let record
     try {
       record = JSON.parse(await fsp.readFile(file, 'utf8'))
@@ -183,9 +228,10 @@ async function scanLiveSessions() {
 }
 
 /** Every thread the desktop app has a record for. */
-async function scanDesktopSessions() {
+async function scanDesktopSessions(desktopSessions) {
   const out = []
-  for (const account of await listDirs(DESKTOP_SESSIONS)) {
+  if (!desktopSessions) return out
+  for (const account of await listDirs(desktopSessions)) {
     for (const org of await listDirs(account)) {
       for (const file of await listFiles(org, (n) => n.startsWith('local_') && n.endsWith('.json'))) {
         try {
@@ -241,20 +287,23 @@ function mergeThread(existing, next) {
  * id looks like.
  */
 function toThread(t) {
-  const { desktopSessionId, desktopSessionIds, cliSessionId, bridgeSessionId, titled, hasLiveProcess, ...rest } = t
+  const { desktopSessionId, desktopSessionIds, cliSessionId, bridgeSessionId, titled, hasLiveProcess, remote, openDisabledReason, ...rest } = t
+  const canOpenLocal = Boolean((desktopSessionId && DESKTOP_ID.test(desktopSessionId)) || (cliSessionId && UUID.test(cliSessionId)))
   return {
     ...rest,
-    canOpen: Boolean((desktopSessionId && DESKTOP_ID.test(desktopSessionId)) || (cliSessionId && UUID.test(cliSessionId))),
-    canArchive: desktopSessionIds.length > 0,
-    ref: { desktopSessionId, desktopSessionIds, cliSessionId },
+    remote: Boolean(remote),
+    canOpen: remote ? false : canOpenLocal,
+    openDisabledReason: remote ? (openDisabledReason || 'Session lives on a remote host') : undefined,
+    canArchive: !remote && desktopSessionIds.length > 0,
+    ref: { desktopSessionId, desktopSessionIds, cliSessionId, remote: Boolean(remote), hostId: t.hostId || 'local' },
   }
 }
 
-async function scanThreads() {
+async function scanRoot(root) {
   const [desktop, transcripts, live] = await Promise.all([
-    scanDesktopSessions(),
-    scanTranscripts(),
-    scanLiveSessions(),
+    scanDesktopSessions(root.desktopSessions),
+    scanTranscripts(root.cliProjects),
+    root.remote ? Promise.resolve(new Set()) : scanLiveSessions(root.cliLive),
   ])
   const byId = new Map()
   const add = (thread) => {
@@ -262,6 +311,8 @@ async function scanThreads() {
     byId.set(thread.id, existing ? mergeThread(existing, thread) : thread)
   }
   const claimed = new Set()
+  const prefixProject = (project) => (root.label ? `${root.label}/${project}` : project)
+  const threadId = (sessionId) => (root.remote ? `${root.id}:${sessionId}` : sessionId)
 
   for (const s of desktop) {
     const cliSessionId = s.cliSessionId || ''
@@ -271,18 +322,22 @@ async function scanThreads() {
     const cwd = s.cwd || s.originCwd || ''
     const { projectPath, project, worktree } = projectOf(cwd, s.originCwd)
     const meta = entry ? await transcriptMeta(entry) : null
+    const sid = cliSessionId || s.sessionId
 
     add({
-      id: cliSessionId || s.sessionId,
+      id: threadId(sid),
+      hostId: root.id,
+      remote: root.remote,
+      openDisabledReason: root.openDisabledReason || '',
       cliSessionId,
       desktopSessionId: s.sessionId || '',
       desktopSessionIds: s.sessionId ? [s.sessionId] : [],
       titled: Boolean(s.title),
       bridgeSessionId: (s.bridgeSessionIds && s.bridgeSessionIds[0]) || '',
-      title: s.title || meta?.customTitle || meta?.aiTitle || meta?.summary || meta?.firstPrompt || 'Untitled thread',
-      preview: meta?.firstPrompt ? meta.firstPrompt.slice(0, 240) : '',
-      project,
-      projectPath,
+      title: resolveTitle([s.title, meta?.customTitle, meta?.aiTitle, meta?.summary, meta?.firstPrompt], project, sid),
+      preview: clipText(looksLikeSystemPrompt(meta?.firstPrompt) ? '' : (meta?.firstPrompt || ''), PREVIEW_MAX),
+      project: prefixProject(project),
+      projectPath: root.remote ? `${root.label}:${projectPath}` : projectPath,
       worktree,
       cwd,
       gitBranch: meta?.gitBranch || '',
@@ -303,23 +358,25 @@ async function scanThreads() {
     })
   }
 
-  // Transcripts with no desktop record — usually threads started straight from the terminal.
   for (const [id, entry] of transcripts) {
     if (claimed.has(id)) continue
     const meta = await transcriptMeta(entry)
     const cwd = meta.cwd || decodeProjectDir(path.basename(entry.projectDir))
     const { projectPath, project, worktree } = projectOf(cwd, '')
     add({
-      id,
+      id: threadId(id),
+      hostId: root.id,
+      remote: root.remote,
+      openDisabledReason: root.openDisabledReason || '',
       cliSessionId: id,
       desktopSessionId: '',
       desktopSessionIds: [],
       titled: Boolean(meta.customTitle || meta.aiTitle),
       bridgeSessionId: '',
-      title: meta.customTitle || meta.aiTitle || meta.summary || meta.firstPrompt || 'Untitled thread',
-      preview: meta.firstPrompt ? meta.firstPrompt.slice(0, 240) : '',
-      project,
-      projectPath,
+      title: resolveTitle([meta.customTitle, meta.aiTitle, meta.summary, meta.firstPrompt], project, id),
+      preview: clipText(looksLikeSystemPrompt(meta.firstPrompt) ? '' : (meta.firstPrompt || ''), PREVIEW_MAX),
+      project: prefixProject(project),
+      projectPath: root.remote ? `${root.label}:${projectPath}` : projectPath,
       worktree,
       cwd,
       gitBranch: meta.gitBranch,
@@ -341,8 +398,6 @@ async function scanThreads() {
   }
 
   const threads = [...byId.values()]
-  // Unread = the thread moved on after you last looked at it; never opened counts as unread.
-  // Terminal-only threads have no focus history at all, so "unread" is unknowable — not true.
   const now = Date.now()
   for (const thread of threads) {
     thread.unread = thread.desktopSessionIds.length > 0 && thread.lastActivityAt > thread.lastFocusedAt
@@ -351,7 +406,26 @@ async function scanThreads() {
   return threads.map(toThread)
 }
 
-/** Locate the desktop app's record for a session. Id is pattern-checked, never joined raw. */
+async function scanThreads() {
+  // Best-effort mirror refresh; never blocks the local scan on a down host.
+  await maybeSyncRemotes().catch((err) => {
+    console.warn('bot-crossing: remote Claude sync —', err?.message || err)
+  })
+
+  const roots = [localRoot(), ...(await listRemoteRoots())]
+  const lists = await Promise.all(
+    roots.map(async (root) => {
+      try {
+        return await scanRoot(root)
+      } catch (err) {
+        console.warn(`bot-crossing: Claude root "${root.id}" failed —`, err?.message || err)
+        return []
+      }
+    })
+  )
+  return lists.flat()
+}
+
 async function findSessionFile(sessionId) {
   if (!DESKTOP_ID.test(sessionId)) return null
   for (const account of await listDirs(DESKTOP_SESSIONS)) {
@@ -392,6 +466,7 @@ async function setSessionArchived(sessionId, archived) {
 
 /** Archive every record that maps to a thread — the real one and any import ghosts. */
 async function setArchived(ref, archived) {
+  if (ref?.remote) return { ok: false, error: 'Remote mirrored sessions cannot be archived from the mini' }
   const ids = ref?.desktopSessionIds || []
   if (!ids.length) return { ok: false, error: 'No session records for that thread' }
   const results = []
@@ -409,7 +484,10 @@ async function setArchived(ref, archived) {
  * the app has never seen. Ids are pattern-checked before they reach the opener.
  */
 function openThread(ref) {
-  const { desktopSessionId, cliSessionId } = ref || {}
+  const { desktopSessionId, cliSessionId, remote, hostId } = ref || {}
+  if (remote) {
+    return { ok: false, error: `Session lives on ${hostId || 'a remote host'} — open Claude there` }
+  }
   if (desktopSessionId && DESKTOP_ID.test(desktopSessionId)) {
     return { ok: true, url: `claude://claude.ai/epitaxy/${desktopSessionId}` }
   }

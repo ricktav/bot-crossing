@@ -1,0 +1,28 @@
+{
+  "syncIntervalMs": 60000,
+  "hosts": [
+    {
+      "id": "alpha",
+      "label": "alpha",
+      "ssh": "alpha",
+      "claudePath": "~/.claude",
+      "enabled": true,
+      "note": "Example remote — SSH Host alias with key auth."
+    },
+    {
+      "id": "bravo",
+      "label": "bravo",
+      "ssh": "bravo",
+      "claudePath": "~/.claude",
+      "enabled": true
+    },
+    {
+      "id": "studio",
+      "label": "studio",
+      "ssh": "studio",
+      "claudePath": "~/.claude",
+      "enabled": false,
+      "note": "rsync mirror (not tokens). Leave enabled:false until sshd/key auth works; you can seed data/remotes/studio/.claude manually."
+    }
+  ]
+}

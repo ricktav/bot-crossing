@@ -4,6 +4,7 @@ import { Sky } from '../world/sky.js'
 import {
   Plot,
   allocateCells,
+  allocateOverviewCells,
   shipPosition,
   createLabel,
   hashString,
@@ -13,6 +14,16 @@ import {
   PLOT_CELL,
 } from '../world/plots.js'
 import { createBuilding, buildingUniforms, Scaffolds } from '../world/buildings.js'
+import {
+  hostOfThread,
+  isOverviewWorld,
+  HOST_COLORS,
+  OVERVIEW_PLANET,
+  STALE_HOST_MS,
+  STALE_OVERVIEW_MS,
+  TILE_FADE_START_MS,
+  TILE_FADE_END_MS,
+} from '../ui/hud-data.js'
 import { Ship } from '../world/ship.js'
 import { Astronauts } from '../agents/astronauts.js'
 import { Indicators, BADGE } from '../agents/indicators.js'
@@ -38,7 +49,6 @@ import { Navigation } from '../agents/navigation.js'
  * you have running.
  */
 
-const STALE_MS = 3 * 24 * 60 * 60 * 1000
 /** How wide an astronaut is, for the purpose of not fitting through gaps it should not. */
 const AGENT_RADIUS = 0.26
 /** Progress a live thread adds per second, so a working site visibly grows while you watch. */
@@ -60,13 +70,25 @@ export const STATUS_LABEL = {
 }
 
 /** Thread → behaviour. First match wins, exactly like the board's auto-sort. */
-export function statusFor(thread, now = Date.now()) {
+export function staleMsForWorld(planetId) {
+  return isOverviewWorld(planetId) ? STALE_OVERVIEW_MS : STALE_HOST_MS
+}
+
+/** Thread → behaviour. `staleMs` is the awake window (host 14d, Overview 7d). */
+export function statusFor(thread, now = Date.now(), staleMs = STALE_HOST_MS) {
   if (thread.hasError) return 'blocked'
   if (thread.running) return 'working'
   if (thread.prState === 'MERGED') return 'celebrating'
   if (thread.unread) return 'waiting'
-  if (now - thread.lastActivityAt > STALE_MS) return 'sleeping'
+  if (now - thread.lastActivityAt > staleMs) return 'sleeping'
   return 'idle'
+}
+
+/** 1 until day 7, then linear to 0 at day 30. */
+export function tileFadeForAge(ageMs) {
+  if (ageMs <= TILE_FADE_START_MS) return 1
+  if (ageMs >= TILE_FADE_END_MS) return 0
+  return 1 - (ageMs - TILE_FADE_START_MS) / (TILE_FADE_END_MS - TILE_FADE_START_MS)
 }
 
 /**
@@ -110,9 +132,10 @@ export class Colony {
     this.camera = camera
     this.renderer = renderer
 
-    this.planet = PLANETS[settings.get('planet')] || PLANETS.moon
+    this.planet = PLANETS[settings.get('planet')] || PLANETS.mini
     this.sky = new Sky(scene, settings, renderer)
     this.sky.setPlanet(this.planet)
+    this._syncNavBounds()
     // Push the stored time in explicitly. `settings.set` is a no-op when the value has not
     // changed, so a colony restored at dusk would otherwise open in the morning and stay
     // there until something happened to touch the slider.
@@ -141,6 +164,7 @@ export class Colony {
     this.particles = new Particles(scene, settings)
     this.scaffolds = new Scaffolds(scene, 320)
     this.nav = new Navigation()
+    this._syncNavBounds()
     this.astronauts.setNavigation(this.nav)
 
     this.plotGroup = new THREE.Group()
@@ -232,7 +256,7 @@ export class Colony {
   }
 
   setPlanet(id) {
-    const planet = PLANETS[id]
+    const planet = PLANETS[id] || PLANETS.mini
     if (!planet || planet === this.planet) return
     this.planet = planet
     this.sky.setPlanet(planet)
@@ -282,9 +306,13 @@ export class Colony {
     // Plots holding anything that wants your attention get a pulsing rim, so you can spot
     // the repo that needs you from right across the colony without reading a single label.
     const urgent = new Set()
-    // Plots with anyone working, waiting or stuck keep their name on screen; quiet ones
-    // only show it on hover.
+    // Plots with anyone still awake keep their name on screen; only sleeping (past the awake window)
+    // hides it until hover — so an active Fleet stays readable without drowning in
+    // dormant labels.
     const active = new Set()
+
+    const staleMs = staleMsForWorld(this.settings.get('planet'))
+    const plotFresh = new Map() // plot id → newest lastActivityAt
 
     for (const [name, list] of projects) {
       const plot = this.plots.get(name)
@@ -293,14 +321,21 @@ export class Colony {
       list.sort((a, b) => a.createdAt - b.createdAt)
 
       list.forEach((thread, i) => {
-        const status = statusFor(thread, now)
+        const status = statusFor(thread, now, staleMs)
         if (stats[status] !== undefined) stats[status]++
         if (status === 'waiting' || status === 'blocked') urgent.add(plot.id)
-        if (status === 'waiting' || status === 'blocked' || status === 'working') active.add(plot.id)
+        if (status !== 'sleeping') active.add(plot.id)
         stats.agents++
+
+        const activity = thread.lastActivityAt || 0
+        plotFresh.set(plot.id, Math.max(plotFresh.get(plot.id) || 0, activity))
 
         const building = this._syncBuilding(thread, plot, i)
         seenBuildings.add(thread.id)
+
+        // Age-fade buildings with their plot tile.
+        const fade = tileFadeForAge(now - activity)
+        this._setMeshFade(building.mesh, fade)
 
         roster.push({
           id: thread.id,
@@ -312,6 +347,12 @@ export class Colony {
           anchor: building.mesh.position.clone(),
         })
       })
+    }
+
+    for (const plot of this.plotOrder) {
+      const fresh = plotFresh.get(plot.id)
+      const fade = fresh == null ? 0 : tileFadeForAge(now - fresh)
+      plot.setFade?.(fade)
     }
 
     // Anything that dropped out of the scan — archived, or a transcript that vanished —
@@ -333,10 +374,20 @@ export class Colony {
     // The previous layout is an input, so a zone only moves when its own footprint changes
     // — never because a different repo gained or lost a thread. `plotCells` carries it
     // between polls, and the colony file carries it between sessions.
-    const layout = allocateCells(
-      projects.map(([name, list]) => ({ id: name, size: list.length })),
-      this.plotCells
-    )
+    const overview = isOverviewWorld(this.settings.get('planet'))
+    const layout = overview
+      ? allocateOverviewCells(
+          projects.map(([name, list]) => ({
+            id: name,
+            size: list.length,
+            host: hostOfThread(list[0]),
+          })),
+          this.plotCells,
+        )
+      : allocateCells(
+          projects.map(([name, list]) => ({ id: name, size: list.length })),
+          this.plotCells,
+        )
     // Remembered, not replaced: a project that has just lost its last thread keeps its
     // ground on the books, and the oldest entries fall off the end.
     for (const [name, cells] of layout) {
@@ -366,7 +417,12 @@ export class Colony {
       if (this.plots.has(name)) return
       const cells = layout.get(name)
       if (!cells?.length) return
-      const accent = this._pickAccent(name)
+      const host = hostOfThread(
+        projects.find(([n]) => n === name)?.[1]?.[0],
+      )
+      const accent = isOverviewWorld(this.settings.get('planet'))
+        ? HOST_COLORS[host] || this._pickAccent(name)
+        : this._pickAccent(name)
       const plot = new Plot({ id: name, name, index, cells, accent })
       plot.signature = wanted.get(name)
       this.plots.set(name, plot)
@@ -481,7 +537,28 @@ export class Colony {
    * anything that is not round, and blocking the full extent closes the gaps between a ring
    * of buildings, which is exactly where the crew needs to walk.
    */
+
+  _setMeshFade(root, fade) {
+    if (!root) return
+    root.traverse((o) => {
+      const mats = o.material ? (Array.isArray(o.material) ? o.material : [o.material]) : []
+      for (const m of mats) {
+        if (!m) continue
+        m.transparent = fade < 0.999
+        m.opacity = fade
+        m.depthWrite = fade > 0.85
+      }
+    })
+    root.visible = fade > 0.02
+  }
+
+  /** Overview settlements sit past the default ±56m walk disk — grow it with the planet. */
+  _syncNavBounds() {
+    const half = this.planet?.navHalf || (isOverviewWorld(this.settings.get('planet')) ? 100 : 56)
+    if (this.nav?.setHalf) this.nav.setHalf(half)
+  }
   _rebuildNavigation() {
+    this._syncNavBounds()
     const obstacles = []
     for (const entry of this.buildings.values()) {
       if (entry.retiring) continue

@@ -12,6 +12,11 @@ import {
   scanThreads,
   setThreadArchived,
 } from './scan.mjs'
+import {
+  claudemuxUrlFor,
+  enrichThreadsWithClaudemux,
+  fleetReportUrl,
+} from './lib/claudemux.mjs'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = process.env.BOT_CROSSING_DATA || path.join(here, '..', 'data')
@@ -30,6 +35,7 @@ const emptyState = () => ({
   archivedAt: {},
   opened: [],
   plots: {},
+  plotsByWorld: {},
   seen: {},
   settings: null,
   updatedAt: 0,
@@ -47,6 +53,7 @@ async function readState() {
       archivedAt: asObject(raw.archivedAt),
       opened: asArray(raw.opened),
       plots: asObject(raw.plots),
+      plotsByWorld: asObject(raw.plotsByWorld),
       seen: asObject(raw.seen),
       settings: raw.settings && typeof raw.settings === 'object' ? raw.settings : null,
       updatedAt: Number(raw.updatedAt) || 0,
@@ -68,6 +75,7 @@ async function writeState(next) {
     archivedAt: asObject(next.archivedAt),
     opened: asArray(next.opened),
     plots: asObject(next.plots),
+    plotsByWorld: asObject(next.plotsByWorld),
     seen: asObject(next.seen),
     settings: next.settings && typeof next.settings === 'object' ? next.settings : null,
     updatedAt: Date.now(),
@@ -79,7 +87,6 @@ async function writeState(next) {
   return state
 }
 
-/**
 /**
  * Hand a `harness://…` deep link, or a folder, to whatever opens things on this OS. The
  * opener gets an argument list, never a shell string.
@@ -190,6 +197,25 @@ function hostnameOf(value) {
 }
 
 /**
+ * Is the HTTP client this Mac itself? Loopback always is; so is any of our own LAN
+ * addresses (Safari on this Mac talking to `http://192.0.2.10:5274/`). An iPad on the
+ * same LAN is not — its remoteAddress is the phone, not us — so OS `open` on the server
+ * would bring Claude forward on the mini while Rick is looking at the iPad. In that case
+ * we skip the server launch and hand the deep link back for the browser to navigate.
+ */
+function clientAddress(req) {
+  const raw = req.socket?.remoteAddress || ''
+  return String(raw).replace(/^::ffff:/, '')
+}
+
+function isSameMachine(req) {
+  const addr = clientAddress(req)
+  if (!addr) return false
+  if (addr === '127.0.0.1' || addr === '::1') return true
+  return LOCAL_HOSTS.has(addr)
+}
+
+/**
  * Only a page this server itself served may drive it. Two checks, against two different
  * attacks, both of which a localhost server with an `open`-the-desktop-app button is a
  * genuinely attractive target for:
@@ -238,6 +264,34 @@ function readJsonBody(req, limit = 4 * 1024 * 1024) {
   })
 }
 
+
+/** Keep the roster payload phone-sized. Some CLI sessions store multi-KB prompts as titles. */
+function slimThread(t) {
+  if (!t || typeof t !== 'object') return t
+  const title = String(t.title || '')
+  const preview = String(t.preview || '')
+  const out = { ...t }
+  if (title.length > 160) out.title = `${title.slice(0, 157)}…`
+  if (preview.length > 240) out.preview = `${preview.slice(0, 237)}…`
+  return out
+}
+
+function filterThreadsByWorld(threads, world) {
+  if (!world || world === 'all' || world === 'overview') return threads
+  const w = String(world)
+  return threads.filter((t) => {
+    if (w === 'fleet') return t.harness === 'grok-bot'
+    if (w === 'mini') {
+      const host = t.hostId || t.ref?.hostId || 'local'
+      return t.harness !== 'grok-bot' && (host === 'local' || host === 'mini' || !host)
+    }
+    const host = t.hostId || t.ref?.hostId || ''
+    if (host === w) return true
+    const project = String(t.project || '')
+    return project === w || project.startsWith(`${w}/`)
+  })
+}
+
 /** Connect-style middleware: handles /api/*, passes everything else through. */
 export async function apiMiddleware(req, res, next) {
   const url = new URL(req.url, 'http://localhost')
@@ -249,8 +303,10 @@ export async function apiMiddleware(req, res, next) {
 
   try {
     if (url.pathname === '/api/threads' && req.method === 'GET') {
-      const threads = await reconcileArchived(await scanThreads())
-      return send(res, 200, { threads, scannedAt: Date.now() })
+      const world = url.searchParams.get('world') || url.searchParams.get('planet') || ''
+      let threads = await enrichThreadsWithClaudemux(await reconcileArchived(await scanThreads()))
+      threads = filterThreadsByWorld(threads, world).map(slimThread)
+      return send(res, 200, { threads, scannedAt: Date.now(), world: world || 'all' })
     }
 
     if (url.pathname === '/api/harnesses' && req.method === 'GET') {
@@ -266,10 +322,37 @@ export async function apiMiddleware(req, res, next) {
     }
 
     if (url.pathname === '/api/open' && req.method === 'POST') {
-      const { harness, ref } = await readJsonBody(req)
-      const result = harnessOpenThread(harness, ref)
-      if (result.ok) launch(result.url)
-      return send(res, result.ok ? 200 : 400, result)
+      const body = await readJsonBody(req)
+      const { harness, ref, project, preferWeb } = body
+      let result = harnessOpenThread(harness, ref)
+
+      // Claudemux web page: preferred when asked, or as the Open fallback for remote Claude
+      // sessions that cannot deep-link on this Mac. Only URLs present in the live index.
+      const wantWeb = Boolean(preferWeb) || (!result.ok && ref?.remote)
+      if (wantWeb || (preferWeb && harness === 'claude-code')) {
+        const web = await claudemuxUrlFor({
+          project: project || ref?.project,
+          hostId: ref?.hostId || (ref?.remote ? undefined : 'local'),
+        })
+        if (web) result = { ok: true, url: web, web: true }
+      }
+
+      // Fleet report when Grok Bot has no agent openUrl.
+      if (!result.ok && harness === 'grok-bot' && preferWeb) {
+        result = { ok: true, url: fleetReportUrl(), web: true }
+      }
+
+      // Always return the URL so a remote browser (iPad on LAN) can navigate it itself.
+      // Only also hand it to the OS opener when the click came from this Mac — otherwise
+      // Claude/Cursor would pop up on the mini while Rick is staring at the phone.
+      // http(s) claudemux links also navigate in *this* browser via the client; still launch
+      // on the mini so a local click opens a tab there too.
+      let launched = false
+      if (result.ok && result.url && isSameMachine(req)) {
+        launch(result.url)
+        launched = true
+      }
+      return send(res, result.ok ? 200 : 400, { ...result, launched })
     }
 
     if ((url.pathname === '/api/new-session' || url.pathname === '/api/reveal') && req.method === 'POST') {
@@ -278,12 +361,23 @@ export async function apiMiddleware(req, res, next) {
       if (!dir) return send(res, 400, { ok: false, error: 'That folder is not on this machine any more' })
 
       if (url.pathname === '/api/reveal') {
+        // Finder/Explorer only exists on this Mac — remote clients get a clear refusal.
+        if (!isSameMachine(req)) {
+          return send(res, 400, {
+            ok: false,
+            error: 'Reveal only works from a browser on this Mac — the folder lives here, not on your phone',
+          })
+        }
         launch(dir)
-        return send(res, 200, { ok: true })
+        return send(res, 200, { ok: true, launched: true })
       }
       const result = harnessNewSession(harness || (await defaultHarness()), dir)
-      if (result.ok) launch(result.url)
-      return send(res, result.ok ? 200 : 400, result)
+      let launched = false
+      if (result.ok && result.url && isSameMachine(req)) {
+        launch(result.url)
+        launched = true
+      }
+      return send(res, result.ok ? 200 : 400, { ...result, launched })
     }
 
     if (url.pathname === '/api/archive' && req.method === 'POST') {

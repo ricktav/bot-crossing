@@ -230,6 +230,103 @@ export function allocateCells(projects, previous = new Map()) {
   return out
 }
 
+/**
+ * Overview layout: each host gets its own settlement spiral, offset on the hex grid so
+ * towns sit next to each other instead of fighting for the same centre.
+ *
+ * @param projects [{ id, size, host }]
+ * @param previous Map id → cells (global coords)
+ */
+/** Host order when packing Overview settlements around Mini. */
+export const OVERVIEW_HOST_ORDER = ['mini', 'dm1', 'dm2', 'clawd', 'imac', 'fleet']
+
+/**
+ * Overview layout: each host packs its own spiral, then towns are placed so neighbouring
+ * settlements have at most two empty hexes between their edges (hex distance ≥ 3, prefer 3).
+ */
+export function allocateOverviewCells(projects, previous = new Map()) {
+  const byHost = new Map()
+  for (const p of projects) {
+    const host = OVERVIEW_HOST_ORDER.includes(p.host) ? p.host : 'mini'
+    if (!byHost.has(host)) byHost.set(host, [])
+    byHost.get(host).push(p)
+  }
+
+  // 1) Local layouts per host (around their own origin).
+  const localByHost = new Map()
+  for (const host of OVERVIEW_HOST_ORDER) {
+    const list = byHost.get(host)
+    if (!list?.length) continue
+    const prevLocal = new Map()
+    for (const p of list) {
+      const cells = previous.get(p.id)
+      if (!cells?.length) continue
+      // Drop sticky layouts from early Overview sketches that sat far out.
+      if (hexDistance(cells[0], ORIGIN) > 10) continue
+      // Rough inverse: treat previous global cells as already-local if near origin; else skip.
+      // We re-pack every time from local allocate + fresh offsets for compactness.
+    }
+    const capped = list.map((p) => ({
+      id: p.id,
+      size: Math.min(p.size, 14), // ≤ 2 cells
+    }))
+    localByHost.set(host, allocateCells(capped, new Map()))
+  }
+
+  // 2) Pack host blobs: Mini at centre, others in a spiral with gap ≤ 2 hexes (dist ≥ 3).
+  const placed = [] // flat list of occupied global cells
+  const out = new Map()
+  const minGapDist = 3 // two hexes between edges
+
+  const minDistToPlaced = (cells) => {
+    if (!placed.length) return Infinity
+    let best = Infinity
+    for (const c of cells) {
+      for (const p of placed) {
+        const d = hexDistance(c, p)
+        if (d < best) best = d
+      }
+    }
+    return best
+  }
+
+  for (const host of OVERVIEW_HOST_ORDER) {
+    const layout = localByHost.get(host)
+    if (!layout) continue
+    const localCells = [...layout.values()].flat()
+    if (!localCells.length) continue
+
+    let offset = { q: 0, r: 0 }
+    if (placed.length) {
+      let best = null
+      let bestScore = Infinity
+      for (let ring = 1; ring < 18; ring++) {
+        for (const cell of hexRing(ring)) {
+          const shifted = localCells.map((c) => ({ q: c.q + cell.q, r: c.r + cell.r }))
+          const d = minDistToPlaced(shifted)
+          if (d < minGapDist) continue
+          // Prefer exactly 2-hex gap (d===3), then closer to origin.
+          const score = (d - minGapDist) * 1000 + hexDistance(cell, ORIGIN) + ring * 0.01
+          if (score < bestScore) {
+            bestScore = score
+            best = cell
+          }
+        }
+        // Early exit once we found a perfect gap on this ring.
+        if (best && bestScore < 1000) break
+      }
+      offset = best || { q: 0, r: 0 }
+    }
+
+    for (const [id, cells] of layout) {
+      const global = cells.map((c) => ({ q: c.q + offset.q, r: c.r + offset.r }))
+      out.set(id, global)
+      placed.push(...global)
+    }
+  }
+  return out
+}
+
 /** Claim free neighbours until the blob is big enough, hugging its root cell first. */
 function growBlob(cells, want, free) {
   const root = cells[0]
@@ -405,6 +502,33 @@ export class Plot {
     this._buildPosts()
     this._buildClutter()
     this.slots = this._buildSlots()
+    this._fadeMats = []
+    this.group.traverse((o) => {
+      if (o.isMesh && o.material) {
+        const mats = Array.isArray(o.material) ? o.material : [o.material]
+        for (const m of mats) {
+          m.transparent = true
+          this._fadeMats.push(m)
+        }
+      }
+    })
+    this._fade = 1
+  }
+
+  /** Age fade: 1 = fresh, 0 = gone (day 30). */
+  setFade(alpha) {
+    const a = Math.max(0, Math.min(1, alpha))
+    this._fade = a
+    for (const m of this._fadeMats || []) {
+      m.opacity = a
+      m.transparent = a < 0.999
+      m.depthWrite = a > 0.85
+    }
+    this.group.visible = a > 0.02
+    if (this.label) {
+      // Labels still use their own activity fade; just hide with the tile when nearly gone.
+      if (a <= 0.02) this.label.visible = false
+    }
   }
 
   /** One merged slab of hex tiles. */

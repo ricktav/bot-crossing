@@ -2,18 +2,20 @@ import * as THREE from 'three'
 import { atlasTexture, hasPart, part } from './kit.js'
 
 /**
- * The three worlds you can put the colony on, and the terrain generator that draws them.
+ * The worlds you can put the colony on, and the terrain generator that draws them.
  *
  * A planet is nothing but a bag of colours and a couple of switches — terrain, scatter, sky
- * and lighting all read from the same preset, so adding a fourth world is a data change
- * rather than a code change.
+ * and lighting all read from the same preset, so adding another world is a data change
+ * rather than a code change. Selectable entries are host worlds (Mini/dm1/…) plus Fleet —
+ * see main.js for the host filter; skins still read like Luna/Mars/Terra.
  */
 
-export const PLANETS = {
+/**
+ * Visual skins (Luna / Mars / Terra / Fleet look). Host worlds below reuse these so each
+ * machine gets its own colony filter without inventing six unique biomes.
+ */
+const SKINS = {
   moon: {
-    id: 'moon',
-    name: 'Luna',
-    blurb: 'Airless, high contrast, very long shadows.',
     ground: { low: 0x4a4a52, high: 0x8f8d90, tint: 0xb9b4ae },
     rock: 0x6d6a70,
     horizon: 0x14141c,
@@ -30,9 +32,6 @@ export const PLANETS = {
     dust: 0,
   },
   mars: {
-    id: 'mars',
-    name: 'Mars',
-    blurb: 'Rust, dust, and a pink sky at noon.',
     ground: { low: 0x6b3320, high: 0xb56b40, tint: 0xd89464 },
     rock: 0x8a4a2c,
     horizon: 0x3a2118,
@@ -48,9 +47,6 @@ export const PLANETS = {
     dust: 1,
   },
   terra: {
-    id: 'terra',
-    name: 'Terra',
-    blurb: 'An earthlike one. Grass, blue hour, fireflies.',
     ground: { low: 0x2f5a34, high: 0x6d9a4a, tint: 0x86ae5c },
     rock: 0x6b6f63,
     horizon: 0x6fa8d8,
@@ -65,6 +61,70 @@ export const PLANETS = {
     companion: { name: 'Moon', color: 0xdcd8cc, size: 3.2, glow: 0xfff6e0 },
     dust: 0.25,
   },
+  fleet: {
+    ground: { low: 0x1a2438, high: 0x3a4e6e, tint: 0x5a7a9a },
+    rock: 0x4a5568,
+    horizon: 0x0c1424,
+    sky: { top: 0x050814, bottom: 0x1a2840 },
+    fog: { color: 0x0a1220, near: 95, far: 220 },
+    sun: { color: 0xc8e4ff, intensity: 2.35, night: 0.07 },
+    ambient: { sky: 0x3a5a88, ground: 0x1a2030, intensity: 0.78 },
+    atmosphere: 0.35,
+    craters: 8,
+    roughness: 0.85,
+    scatter: 'rocks',
+    companion: { name: 'Station', color: 0x88aacc, size: 2.4, glow: 0x66ccff },
+    dust: 0.15,
+  },
+}
+
+const withSkin = (skin, meta) => ({ ...SKINS[skin], ...meta, skin })
+
+/**
+ * Host worlds + Fleet. Filtered in main.js by host label / harness so each machine is its
+ * own colony. Skins reuse Luna/Mars/Terra/Fleet looks.
+ */
+export const PLANETS = {
+  mini: withSkin('moon', {
+    id: 'mini',
+    name: 'Mini',
+    blurb: 'Local Claude on this machine — no host prefix.',
+  }),
+  dm1: withSkin('mars', {
+    id: 'dm1',
+    name: 'dm1',
+    blurb: 'Remote Claude mirror — plots prefixed dm1/.',
+  }),
+  dm2: withSkin('terra', {
+    id: 'dm2',
+    name: 'dm2',
+    blurb: 'Second remote mirror — its own colony, not mixed with Mini.',
+  }),
+  clawd: withSkin('moon', {
+    id: 'clawd',
+    name: 'clawd',
+    blurb: 'Optional remote mirror — plots prefixed clawd/.',
+  }),
+  imac: withSkin('mars', {
+    id: 'imac',
+    name: 'iMac',
+    blurb: 'Optional rsync mirror (not tokens); leave disabled until sshd.',
+  }),
+  // Grok Bot agents only — coding threads stay on host worlds. Filtered in main.js.
+  fleet: withSkin('fleet', {
+    id: 'fleet',
+    name: 'Fleet',
+    blurb: 'Grok Bot dockyard — cold hulls, long shadows, cyan trim.',
+  }),
+  // Sketch: every host as a neighbouring settlement. Wider colony floor so sectors fit.
+  overview: withSkin('terra', {
+    id: 'overview',
+    name: 'Overview',
+    blurb: 'All hosts + Fleet as separate settlements — host-coloured crew.',
+    // Stretch the flat buildable disk so sector towns stay on level ground.
+    colonyRadius: 95,
+    navHalf: 100,
+  }),
 }
 
 const GROUND_SIZE = 340
@@ -84,7 +144,7 @@ export function createTerrain(planet, detail, seed = 1337) {
   geo.rotateX(-Math.PI / 2)
 
   const noise = makeNoise(seed)
-  const craters = makeCraters(planet.craters, seed)
+  const craters = makeCraters(planet.craters, seed, planet.colonyRadius ?? COLONY_RADIUS)
   const pos = geo.attributes.position
   const colors = new Float32Array(pos.count * 3)
 
@@ -100,7 +160,8 @@ export function createTerrain(planet, detail, seed = 1337) {
 
     // Flat where the colony lives, then hills that ramp in over the next forty metres —
     // so nothing ever builds on a slope but the horizon still has shape to it.
-    const outside = THREE.MathUtils.smoothstep(dist, COLONY_RADIUS - 6, COLONY_RADIUS + 40)
+    const flatR = planet.colonyRadius ?? COLONY_RADIUS
+    const outside = THREE.MathUtils.smoothstep(dist, flatR - 6, flatR + 40)
     const gentle = fbm(noise, x * 0.035, z * 0.035, 3) * 0.5
     const hills = fbm(noise, x * 0.012, z * 0.012, 4) * 9 + fbm(noise, x * 0.05, z * 0.05, 2) * 1.4
     let y = gentle * planet.roughness * (1 - outside) + hills * outside * planet.roughness
@@ -151,7 +212,8 @@ export function createTerrain(planet, detail, seed = 1337) {
 
 function sampleHeight(x, z, noise, craters, planet) {
   const dist = Math.hypot(x, z)
-  const outside = THREE.MathUtils.smoothstep(dist, COLONY_RADIUS - 6, COLONY_RADIUS + 40)
+  const flatR = planet.colonyRadius ?? COLONY_RADIUS
+    const outside = THREE.MathUtils.smoothstep(dist, flatR - 6, flatR + 40)
   const gentle = fbm(noise, x * 0.035, z * 0.035, 3) * 0.5
   const hills = fbm(noise, x * 0.012, z * 0.012, 4) * 9 + fbm(noise, x * 0.05, z * 0.05, 2) * 1.4
   let y = gentle * planet.roughness * (1 - outside) + hills * outside * planet.roughness
@@ -166,12 +228,12 @@ function sampleHeight(x, z, noise, craters, planet) {
 }
 
 /** Craters only ever land outside the colony, so they never eat a build plot. */
-function makeCraters(count, seed) {
+function makeCraters(count, seed, flatR = COLONY_RADIUS) {
   const rand = mulberry(seed ^ 0x9e37)
   const out = []
   for (let i = 0; i < count; i++) {
     const a = rand() * Math.PI * 2
-    const d = COLONY_RADIUS + 14 + rand() * 110
+    const d = flatR + 14 + rand() * 110
     const r = 4 + rand() * 16
     out.push({ x: Math.cos(a) * d, z: Math.sin(a) * d, r, depth: r * (0.18 + rand() * 0.16) })
   }
@@ -283,10 +345,12 @@ export function createScatter(planet, density, keepClear = [], seed = 4242) {
     return kinds.length - 1
   }
 
+  const flatR0 = planet.colonyRadius ?? COLONY_RADIUS
   for (let i = 0; i < count; i++) {
     // Bias outward: a ring is thicker where there is more area, which √ gives for free.
     const a = rand() * Math.PI * 2
-    const d = 9 + Math.sqrt(rand()) * 150
+    // Keep the flat colony disk mostly clear of forest — Overview towns live out there.
+    const d = flatR0 * 0.92 + Math.sqrt(rand()) * 150
     const x = Math.cos(a) * d
     const z = Math.sin(a) * d
     if (keepClear.some((p) => Math.hypot(x - p.x, z - p.z) < p.r)) continue
@@ -298,7 +362,8 @@ export function createScatter(planet, density, keepClear = [], seed = 4242) {
     if (slot >= mesh.instanceMatrix.count) continue
 
     // Far-field props are allowed to be much bigger, which reads as distance.
-    const far = THREE.MathUtils.smoothstep(d, COLONY_RADIUS, 130)
+    const flatR = planet.colonyRadius ?? COLONY_RADIUS
+    const far = THREE.MathUtils.smoothstep(d, flatR, 130)
     const [lo, hi] = kind.size
     const s = (lo + rand() * (hi - lo)) * (1 + far * 1.9)
 
