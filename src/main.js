@@ -3,7 +3,7 @@ import './ui/styles.css'
 import { DEFAULT_PRESET, Settings, hasStoredSettings } from './core/settings.js'
 import { Engine } from './core/engine.js'
 import { CameraRig } from './core/camera.js'
-import { Colony, STATUS_LABEL, STATUS_ORDER, statusFor, transcriptProgress } from './game/colony.js'
+import { Colony, STATUS_LABEL, STATUS_ORDER, statusFor, staleMsForWorld, transcriptProgress } from './game/colony.js'
 import { Hud } from './ui/hud.js'
 import { PLANETS } from './world/planet.js'
 import {
@@ -415,7 +415,7 @@ function syncProject() {
       title: thread.title,
       worktree: thread.worktree,
       lastActivityAt: thread.lastActivityAt,
-      status: statusFor(thread, now),
+      status: statusFor(thread, now, staleMsForWorld(settings.get('planet'))),
     }))
     // Whoever wants something first, then most recently touched — the same order of
     // importance the badges use above their heads.
@@ -669,13 +669,12 @@ function restoreWorldLayout(world) {
 /** One host world (or Fleet) at a time — dm2 must not swamp Mini. */
 function threadsForPlanet(list, planetId = settings.get('planet')) {
   const world = normalizeWorld(planetId)
-  // Overview is a map of *living* settlements — dm2/linkstash alone has hundreds of
-  // dormant transcripts that would own the whole skyline if we drew every ghost.
-  if (world === OVERVIEW_PLANET) {
-    const now = Date.now()
-    return list.filter((t) => statusFor(t, now) !== 'sleeping')
-  }
-  return list.filter((t) => hostOfThread(t) === world)
+  const now = Date.now()
+  const staleMs = staleMsForWorld(world)
+  // Host worlds: awake ≤14d. Overview: awake ≤7d. Sleeping ghosts stay off the map.
+  const awake = (t) => statusFor(t, now, staleMs) !== 'sleeping'
+  if (world === OVERVIEW_PLANET) return list.filter(awake)
+  return list.filter((t) => hostOfThread(t) === world && awake(t))
 }
 
 function applyThreads(list) {

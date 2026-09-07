@@ -14,7 +14,16 @@ import {
   PLOT_CELL,
 } from '../world/plots.js'
 import { createBuilding, buildingUniforms, Scaffolds } from '../world/buildings.js'
-import { hostOfThread, isOverviewWorld, HOST_COLORS, OVERVIEW_PLANET } from '../ui/hud-data.js'
+import {
+  hostOfThread,
+  isOverviewWorld,
+  HOST_COLORS,
+  OVERVIEW_PLANET,
+  STALE_HOST_MS,
+  STALE_OVERVIEW_MS,
+  TILE_FADE_START_MS,
+  TILE_FADE_END_MS,
+} from '../ui/hud-data.js'
 import { Ship } from '../world/ship.js'
 import { Astronauts } from '../agents/astronauts.js'
 import { Indicators, BADGE } from '../agents/indicators.js'
@@ -40,7 +49,6 @@ import { Navigation } from '../agents/navigation.js'
  * you have running.
  */
 
-const STALE_MS = 3 * 24 * 60 * 60 * 1000
 /** How wide an astronaut is, for the purpose of not fitting through gaps it should not. */
 const AGENT_RADIUS = 0.26
 /** Progress a live thread adds per second, so a working site visibly grows while you watch. */
@@ -62,13 +70,25 @@ export const STATUS_LABEL = {
 }
 
 /** Thread → behaviour. First match wins, exactly like the board's auto-sort. */
-export function statusFor(thread, now = Date.now()) {
+export function staleMsForWorld(planetId) {
+  return isOverviewWorld(planetId) ? STALE_OVERVIEW_MS : STALE_HOST_MS
+}
+
+/** Thread → behaviour. `staleMs` is the awake window (host 14d, Overview 7d). */
+export function statusFor(thread, now = Date.now(), staleMs = STALE_HOST_MS) {
   if (thread.hasError) return 'blocked'
   if (thread.running) return 'working'
   if (thread.prState === 'MERGED') return 'celebrating'
   if (thread.unread) return 'waiting'
-  if (now - thread.lastActivityAt > STALE_MS) return 'sleeping'
+  if (now - thread.lastActivityAt > staleMs) return 'sleeping'
   return 'idle'
+}
+
+/** 1 until day 7, then linear to 0 at day 30. */
+export function tileFadeForAge(ageMs) {
+  if (ageMs <= TILE_FADE_START_MS) return 1
+  if (ageMs >= TILE_FADE_END_MS) return 0
+  return 1 - (ageMs - TILE_FADE_START_MS) / (TILE_FADE_END_MS - TILE_FADE_START_MS)
 }
 
 /**
@@ -286,10 +306,13 @@ export class Colony {
     // Plots holding anything that wants your attention get a pulsing rim, so you can spot
     // the repo that needs you from right across the colony without reading a single label.
     const urgent = new Set()
-    // Plots with anyone still awake keep their name on screen; only sleeping (quiet ~3
-    // days) hides it until hover — so an active Fleet stays readable without drowning in
+    // Plots with anyone still awake keep their name on screen; only sleeping (past the awake window)
+    // hides it until hover — so an active Fleet stays readable without drowning in
     // dormant labels.
     const active = new Set()
+
+    const staleMs = staleMsForWorld(this.settings.get('planet'))
+    const plotFresh = new Map() // plot id → newest lastActivityAt
 
     for (const [name, list] of projects) {
       const plot = this.plots.get(name)
@@ -298,14 +321,21 @@ export class Colony {
       list.sort((a, b) => a.createdAt - b.createdAt)
 
       list.forEach((thread, i) => {
-        const status = statusFor(thread, now)
+        const status = statusFor(thread, now, staleMs)
         if (stats[status] !== undefined) stats[status]++
         if (status === 'waiting' || status === 'blocked') urgent.add(plot.id)
         if (status !== 'sleeping') active.add(plot.id)
         stats.agents++
 
+        const activity = thread.lastActivityAt || 0
+        plotFresh.set(plot.id, Math.max(plotFresh.get(plot.id) || 0, activity))
+
         const building = this._syncBuilding(thread, plot, i)
         seenBuildings.add(thread.id)
+
+        // Age-fade buildings with their plot tile.
+        const fade = tileFadeForAge(now - activity)
+        this._setMeshFade(building.mesh, fade)
 
         roster.push({
           id: thread.id,
@@ -317,6 +347,12 @@ export class Colony {
           anchor: building.mesh.position.clone(),
         })
       })
+    }
+
+    for (const plot of this.plotOrder) {
+      const fresh = plotFresh.get(plot.id)
+      const fade = fresh == null ? 0 : tileFadeForAge(now - fresh)
+      plot.setFade?.(fade)
     }
 
     // Anything that dropped out of the scan — archived, or a transcript that vanished —

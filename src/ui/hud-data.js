@@ -16,6 +16,13 @@ export const FLEET_PLANET = 'fleet'
 /** All hosts + Fleet as neighbouring settlements on one map. */
 export const OVERVIEW_PLANET = 'overview'
 
+/** Awake window: host worlds keep threads this long; Overview is tighter. */
+export const STALE_HOST_MS = 14 * 86400000
+export const STALE_OVERVIEW_MS = 7 * 86400000
+/** Plot tiles: full opacity until day 7, then fade to gone by day 30. */
+export const TILE_FADE_START_MS = 7 * 86400000
+export const TILE_FADE_END_MS = 30 * 86400000
+
 /** Suit / accent colours per host — Overview only. */
 export const HOST_COLORS = {
   mini: 0xf0c060,
