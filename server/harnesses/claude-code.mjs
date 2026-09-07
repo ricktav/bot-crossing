@@ -47,6 +47,26 @@ function clipText(value, max) {
   return s.slice(0, max - 1).trimEnd() + '…'
 }
 
+/** Role/system preambles are not titles — linkstash workers all share one. */
+function looksLikeSystemPrompt(text) {
+  const t = String(text || '').replace(/\s+/g, ' ').trim()
+  if (t.length < 36) return false
+  return /^(je bent|jij bent|you are|you\'re|you’re|your (task|role|job)|du bist|act as|system\s*:|here is your|hieronder )/i.test(t)
+}
+
+/** Prefer a real title; never surface a persona prompt as the thread name. */
+function resolveTitle(candidates, project, sessionId) {
+  for (const raw of candidates) {
+    const s = String(raw || '').replace(/\s+/g, ' ').trim()
+    if (!s || looksLikeSystemPrompt(s)) continue
+    return clipText(s, TITLE_MAX)
+  }
+  const base = String(project || '').split('/').filter(Boolean).pop() || 'thread'
+  const tag = String(sessionId || '').replace(/^.*[_:-]/, '').slice(-4)
+  return clipText(tag ? `${base} · ${tag}` : base, TITLE_MAX)
+}
+
+
 /** Where the CLI keeps the raw transcript: ~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl */
 const CLI_PROJECTS = path.join(HOME, '.claude', 'projects')
 /** One file per live CLI process: {pid, sessionId, cwd, ...}. Stale files outlive their pid. */
@@ -314,8 +334,8 @@ async function scanRoot(root) {
       desktopSessionIds: s.sessionId ? [s.sessionId] : [],
       titled: Boolean(s.title),
       bridgeSessionId: (s.bridgeSessionIds && s.bridgeSessionIds[0]) || '',
-      title: clipText(s.title || meta?.customTitle || meta?.aiTitle || meta?.summary || meta?.firstPrompt || 'Untitled thread', TITLE_MAX),
-      preview: clipText(meta?.firstPrompt || '', PREVIEW_MAX),
+      title: resolveTitle([s.title, meta?.customTitle, meta?.aiTitle, meta?.summary, meta?.firstPrompt], project, sid),
+      preview: clipText(looksLikeSystemPrompt(meta?.firstPrompt) ? '' : (meta?.firstPrompt || ''), PREVIEW_MAX),
       project: prefixProject(project),
       projectPath: root.remote ? `${root.label}:${projectPath}` : projectPath,
       worktree,
@@ -353,8 +373,8 @@ async function scanRoot(root) {
       desktopSessionIds: [],
       titled: Boolean(meta.customTitle || meta.aiTitle),
       bridgeSessionId: '',
-      title: clipText(meta.customTitle || meta.aiTitle || meta.summary || meta.firstPrompt || 'Untitled thread', TITLE_MAX),
-      preview: clipText(meta.firstPrompt || '', PREVIEW_MAX),
+      title: resolveTitle([meta.customTitle, meta.aiTitle, meta.summary, meta.firstPrompt], project, id),
+      preview: clipText(looksLikeSystemPrompt(meta.firstPrompt) ? '' : (meta.firstPrompt || ''), PREVIEW_MAX),
       project: prefixProject(project),
       projectPath: root.remote ? `${root.label}:${projectPath}` : projectPath,
       worktree,

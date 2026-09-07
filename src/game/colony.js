@@ -115,6 +115,7 @@ export class Colony {
     this.planet = PLANETS[settings.get('planet')] || PLANETS.mini
     this.sky = new Sky(scene, settings, renderer)
     this.sky.setPlanet(this.planet)
+    this._syncNavBounds()
     // Push the stored time in explicitly. `settings.set` is a no-op when the value has not
     // changed, so a colony restored at dusk would otherwise open in the morning and stay
     // there until something happened to touch the slider.
@@ -143,6 +144,7 @@ export class Colony {
     this.particles = new Particles(scene, settings)
     this.scaffolds = new Scaffolds(scene, 320)
     this.nav = new Navigation()
+    this._syncNavBounds()
     this.astronauts.setNavigation(this.nav)
 
     this.plotGroup = new THREE.Group()
@@ -499,7 +501,14 @@ export class Colony {
    * anything that is not round, and blocking the full extent closes the gaps between a ring
    * of buildings, which is exactly where the crew needs to walk.
    */
+
+  /** Overview settlements sit past the default ±56m walk disk — grow it with the planet. */
+  _syncNavBounds() {
+    const half = this.planet?.navHalf || (isOverviewWorld(this.settings.get('planet')) ? 100 : 56)
+    if (this.nav?.setHalf) this.nav.setHalf(half)
+  }
   _rebuildNavigation() {
+    this._syncNavBounds()
     const obstacles = []
     for (const entry of this.buildings.values()) {
       if (entry.retiring) continue

@@ -238,12 +238,13 @@ export function allocateCells(projects, previous = new Map()) {
  * @param previous Map id → cells (global coords)
  */
 export const OVERVIEW_SECTORS = {
+  // Kept close: nav default was ±56m and hex q=7 alone is ~80m from centre.
   mini: { q: 0, r: 0 },
-  dm1: { q: 7, r: -3 },
-  dm2: { q: 4, r: 6 },
-  clawd: { q: -7, r: 4 },
-  imac: { q: -4, r: -6 },
-  fleet: { q: 0, r: -7 },
+  dm1: { q: 4, r: -2 },
+  dm2: { q: 2, r: 4 },
+  clawd: { q: -4, r: 2 },
+  imac: { q: -2, r: -4 },
+  fleet: { q: 0, r: -4 },
 }
 
 export function allocateOverviewCells(projects, previous = new Map()) {
@@ -261,6 +262,8 @@ export function allocateOverviewCells(projects, previous = new Map()) {
     for (const p of list) {
       const cells = previous.get(p.id)
       if (!cells?.length) continue
+      // First sketch parked towns past the nav disk (q≈7 → ~80m). Drop those stickies.
+      if (hexDistance(cells[0], ORIGIN) > 8) continue
       prevLocal.set(
         p.id,
         cells.map((c) => ({ q: c.q - sector.q, r: c.r - sector.r })),
@@ -269,7 +272,7 @@ export function allocateOverviewCells(projects, previous = new Map()) {
     // Cap sprawl in the overview sketch so dm2 does not swallow the map.
     const capped = list.map((p) => ({
       id: p.id,
-      size: Math.min(p.size, 21), // ≤ 3 cells (ceil(21/7))
+      size: Math.min(p.size, 14), // ≤ 2 cells — Overview must fit inside the nav disk
     }))
     const local = allocateCells(capped, prevLocal)
     for (const [id, cells] of local) {

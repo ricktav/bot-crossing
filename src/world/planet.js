@@ -122,7 +122,8 @@ export const PLANETS = {
     name: 'Overview',
     blurb: 'All hosts + Fleet as separate settlements — host-coloured crew.',
     // Stretch the flat buildable disk so sector towns stay on level ground.
-    colonyRadius: 78,
+    colonyRadius: 95,
+    navHalf: 100,
   }),
 }
 
@@ -143,7 +144,7 @@ export function createTerrain(planet, detail, seed = 1337) {
   geo.rotateX(-Math.PI / 2)
 
   const noise = makeNoise(seed)
-  const craters = makeCraters(planet.craters, seed)
+  const craters = makeCraters(planet.craters, seed, planet.colonyRadius ?? COLONY_RADIUS)
   const pos = geo.attributes.position
   const colors = new Float32Array(pos.count * 3)
 
@@ -227,12 +228,12 @@ function sampleHeight(x, z, noise, craters, planet) {
 }
 
 /** Craters only ever land outside the colony, so they never eat a build plot. */
-function makeCraters(count, seed) {
+function makeCraters(count, seed, flatR = COLONY_RADIUS) {
   const rand = mulberry(seed ^ 0x9e37)
   const out = []
   for (let i = 0; i < count; i++) {
     const a = rand() * Math.PI * 2
-    const d = COLONY_RADIUS + 14 + rand() * 110
+    const d = flatR + 14 + rand() * 110
     const r = 4 + rand() * 16
     out.push({ x: Math.cos(a) * d, z: Math.sin(a) * d, r, depth: r * (0.18 + rand() * 0.16) })
   }
@@ -344,10 +345,12 @@ export function createScatter(planet, density, keepClear = [], seed = 4242) {
     return kinds.length - 1
   }
 
+  const flatR0 = planet.colonyRadius ?? COLONY_RADIUS
   for (let i = 0; i < count; i++) {
     // Bias outward: a ring is thicker where there is more area, which √ gives for free.
     const a = rand() * Math.PI * 2
-    const d = 9 + Math.sqrt(rand()) * 150
+    // Keep the flat colony disk mostly clear of forest — Overview towns live out there.
+    const d = flatR0 * 0.92 + Math.sqrt(rand()) * 150
     const x = Math.cos(a) * d
     const z = Math.sin(a) * d
     if (keepClear.some((p) => Math.hypot(x - p.x, z - p.z) < p.r)) continue
@@ -359,7 +362,8 @@ export function createScatter(planet, density, keepClear = [], seed = 4242) {
     if (slot >= mesh.instanceMatrix.count) continue
 
     // Far-field props are allowed to be much bigger, which reads as distance.
-    const far = THREE.MathUtils.smoothstep(d, COLONY_RADIUS, 130)
+    const flatR = planet.colonyRadius ?? COLONY_RADIUS
+    const far = THREE.MathUtils.smoothstep(d, flatR, 130)
     const [lo, hi] = kind.size
     const s = (lo + rand() * (hi - lo)) * (1 + far * 1.9)
 
