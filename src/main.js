@@ -669,7 +669,12 @@ function restoreWorldLayout(world) {
 /** One host world (or Fleet) at a time — dm2 must not swamp Mini. */
 function threadsForPlanet(list, planetId = settings.get('planet')) {
   const world = normalizeWorld(planetId)
-  if (world === OVERVIEW_PLANET) return list
+  // Overview is a map of *living* settlements — dm2/linkstash alone has hundreds of
+  // dormant transcripts that would own the whole skyline if we drew every ghost.
+  if (world === OVERVIEW_PLANET) {
+    const now = Date.now()
+    return list.filter((t) => statusFor(t, now) !== 'sleeping')
+  }
   return list.filter((t) => hostOfThread(t) === world)
 }
 
